@@ -1,0 +1,28 @@
+{
+  "attributes": {
+    "title": "Stock Price Predictions Dashboard",
+    "hits": 0,
+    "description": "Visualization of stock price predictions vs actual prices",
+    "panelsJSON": "[{\"embeddableConfig\":{\"title\":\"Predicted vs Actual Prices\"},\"gridData\":{\"h\":15,\"i\":\"1\",\"w\":24,\"x\":0,\"y\":0},\"id\":\"price-compare-visualization\",\"panelIndex\":\"1\",\"type\":\"visualization\",\"version\":\"7.10.0\"},{\"embeddableConfig\":{\"title\":\"Prediction Accuracy\"},\"gridData\":{\"h\":15,\"i\":\"2\",\"w\":12,\"x\":0,\"y\":15},\"id\":\"prediction-accuracy\",\"panelIndex\":\"2\",\"type\":\"visualization\",\"version\":\"7.10.0\"},{\"embeddableConfig\":{\"title\":\"Latest Predictions\"},\"gridData\":{\"h\":15,\"i\":\"3\",\"w\":12,\"x\":12,\"y\":15},\"id\":\"latest-predictions\",\"panelIndex\":\"3\",\"type\":\"visualization\",\"version\":\"7.10.0\"}]",
+    "timeRestore": false,
+    "version": 1
+  },
+  "references": [
+    {
+      "id": "price-compare-visualization",
+      "name": "panel_1",
+      "type": "visualization"
+    },
+    {
+      "id": "prediction-accuracy",
+      "name": "panel_2",
+      "type": "visualization"
+    },
+    {
+      "id": "latest-predictions",
+      "name": "panel_3",
+      "type": "visualization"
+    }
+  ],
+  "type": "dashboard"
+}

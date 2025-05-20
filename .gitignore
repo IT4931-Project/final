@@ -1,0 +1,12 @@
+/.env
+
+node_modules
+/.pnp
+.pnp.js
+/.pnp.cjs
+
+*.log
+*.tsbuildinfo
+*.tgz
+*.zip
+*.tgz

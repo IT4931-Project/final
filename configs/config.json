@@ -1,0 +1,75 @@
+{
+  "crawler": {
+    "schedule": "*/10 * * * *",
+    "symbols": ["AAPL", "MSFT", "GOOG", "AMZN", "TSLA"],
+    "use_mock_data": true,
+    "alpha_vantage": {
+      "api_key": "",
+      "output_size": "compact",
+      "function": "TIME_SERIES_DAILY"
+    }
+  },
+  "etl": {
+    "schedule": "0 */12 * * *",
+    "technical_indicators": {
+      "sma_periods": [5, 20, 50, 200],
+      "calculate_macd": true,
+      "calculate_bollinger": true,
+      "calculate_rsi": true,
+      "calculate_obv": true
+    }
+  },
+  "trainer": {
+    "schedule": "0 0 */2 * *",
+    "model_params": {
+      "sequence_length": 30,
+      "future_days": 7,
+      "batch_size": 64,
+      "epochs": 50,
+      "patience": 10,
+      "validation_split": 0.2,
+      "learning_rate": 0.001,
+      "hidden_units": 50,
+      "num_layers": 2,
+      "dropout_rate": 0.2
+    },
+    "use_bigdl_orca": true
+  },
+  "inference": {
+    "schedule": "0 0 * * *",
+    "store_in_elasticsearch": true
+  },
+  "paths": {
+    "raw_data": "/app/data/raw",
+    "processed_data": "/app/data/processed",
+    "models": "/app/data/models",
+    "logs": "/app/logs"
+  },
+  "mongodb": {
+    "host": "mongodb",
+    "port": 27017,
+    "database": "finance_data",
+    "username": "admin",
+    "password": "password",
+    "auth_source": "admin"
+  },
+  "elasticsearch": {
+    "host": "elasticsearch",
+    "port": 9200,
+    "username": "elastic",
+    "password": "changeme",
+    "index_prefix": "stock_"
+  },
+  "kibana": {
+    "host": "kibana",
+    "port": 5601
+  },
+  "spark": {
+    "master": "spark://spark-master:7077",
+    "executor_memory": "1g",
+    "driver_memory": "1g",
+    "executor_cores": 2,
+    "driver_cores": 1,
+    "max_executors": 2
+  }
+}

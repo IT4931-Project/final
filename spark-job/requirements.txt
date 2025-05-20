@@ -1,0 +1,10 @@
+pyspark==3.3.0
+pymongo==4.3.3
+pandas==1.5.3
+numpy==1.24.3
+matplotlib==3.7.1
+python-dotenv==1.0.0
+pyarrow==12.0.0
+fastparquet==2023.4.0
+ta==0.10.2  # Technical Analysis library for financial indicators
+scikit-learn==1.2.2  # For standardization and feature engineering

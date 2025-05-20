@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""
+Crawler
+
+Crawl -> Kafka
+
+"""
+
+import os
+import time
+import json
+import logging
+import datetime
+import pandas as pd
+import pytz
+from dotenv import load_dotenv
+from confluent_kafka import Producer
+import csv
+
+from fetch_utils import (
+    fetch_stock_history,
+    fetch_stock_actions,
+    fetch_stock_info,
+    fetch_stock_financials,
+    load_stock_symbols
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("/app/logs/crawler.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("crawler")
+
+# load env
+load_dotenv()
+
+# config kafka
+KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092')
+KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC', 'stock_ohlcv')
+KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
+KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
+
+# stock symbols
+SYMBOLS_FILE = os.getenv('STOCK_SYMBOLS_FILE', '/data/stockList.csv')
+RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/data/raw')
+FETCH_INTERVAL = int(os.getenv('FETCH_INTERVAL', '86400'))  # Default: 24 hours
+
+def delivery_report(err, msg):
+    """callback cho producer để check message status"""
+    if err is not None:
+        logger.error(f"Message delivery failed: {err}")
+    else:
+        logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
+
+def create_kafka_producer():
+    """create kafka producer"""
+    producer_conf = {
+        'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS
+    }
+    return Producer(producer_conf)
+
+def save_to_csv(data, symbol, data_type='history'):
+    """
+    Lưu dữ liệu vào file CSV để backup
+    
+    Tham số:
+        data: Dữ liệu cần lưu (DataFrame hoặc dict)
+        symbol (str): Mã cổ phiếu
+        data_type (str): Loại dữ liệu (history, actions, info)
+    """
+    try:
+        # check xem thư mục đã tồn tại chưa
+        symbol_dir = os.path.join(RAW_DATA_PATH, symbol)
+        os.makedirs(symbol_dir, exist_ok=True)
+        
+        # Tạo tên file với timestamp
+        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        filename = os.path.join(symbol_dir, f"{symbol}_{data_type}_{timestamp}")
+        
+        # Lưu dựa trên loại dữ liệu
+        if isinstance(data, pd.DataFrame):
+            data.to_csv(f"{filename}.csv", index=False)
+        elif isinstance(data, dict):
+            with open(f"{filename}.json", 'w') as json_file:
+                json.dump(data, json_file, default=str)
+        
+        logger.info(f"Saved {data_type} data to {filename}")
+        
+    except Exception as e:
+        logger.error(f"Error saving {data_type} data to CSV/JSON: {e}")
+
+def process_historical_data(symbol, producer):
+    """data processing cho dữ liệu lịch sử"""
+    logger.info(f"Processing historical data for {symbol}")
+    
+    df = fetch_stock_history(symbol, period="30d")
+    if df is None or df.empty:
+        return False
+    
+    # Lưu vào CSV để backup
+    save_to_csv(df, symbol, 'history')
+    
+    # Gửi từng dòng đến Kafka
+    count = 0
+    for _, row in df.iterrows():
+        # Tạo một bản ghi với các trường cần thiết
+        record = {
+            'ticker': symbol,
+            'date': row['Date'].strftime('%Y-%m-%d'),
+            'open': float(row['Open']),
+            'high': float(row['High']),
+            'low': float(row['Low']),
+            'close': float(row['Close']),
+            'volume': int(row['Volume'])
+        }
+        
+        # Chuyển đổi thành JSON và gửi đến Kafka
+        json_value = json.dumps(record)
+        producer.produce(
+            topic=KAFKA_TOPIC_OHLCV,
+            key=symbol,
+            value=json_value,
+            callback=delivery_report
+        )
+        count += 1
+    
+    producer.flush()
+    logger.info(f"Sent {count} historical data records for {symbol}")
+    return True
+
+def process_actions_data(symbol, producer):
+    """Xử lý và gửi dữ liệu hành động (cổ tức/chia tách) cho một mã cổ phiếu"""
+    logger.info(f"Processing actions data for {symbol}")
+    
+    df = fetch_stock_actions(symbol)
+    if df is None or df.empty:
+        logger.info(f"No actions data available for {symbol}")
+        return False
+    
+    # Lưu vào CSV để backup
+    save_to_csv(df, symbol, 'actions')
+    
+    # Gửi từng dòng đến Kafka
+    count = 0
+    for _, row in df.iterrows():
+        # Tạo một bản ghi với các trường cần thiết
+        record = {
+            'ticker': symbol,
+            'date': row['date'].strftime('%Y-%m-%d'),
+            'dividends': float(row['Dividends']) if 'Dividends' in row else 0.0,
+            'stock_splits': float(row['Stock Splits']) if 'Stock Splits' in row else 0.0
+        }
+        
+        # Chuyển đổi thành JSON và gửi đến Kafka
+        json_value = json.dumps(record)
+        producer.produce(
+            topic=KAFKA_TOPIC_ACTIONS,
+            key=symbol,
+            value=json_value,
+            callback=delivery_report
+        )
+        count += 1
+    
+    producer.flush()
+    logger.info(f"Sent {count} actions records for {symbol}")
+    return True
+
+def process_company_info(symbol, producer):
+    """Xử lý và gửi dữ liệu thông tin công ty cho một mã cổ phiếu"""
+    logger.info(f"Processing company info for {symbol}")
+    
+    info = fetch_stock_info(symbol)
+    if info is None:
+        logger.info(f"No company info available for {symbol}")
+        return False
+    
+    # Lưu vào JSON để backup
+    save_to_csv(info, symbol, 'info')
+    
+    # Chuyển đổi thành JSON và gửi đến Kafka
+    json_value = json.dumps(info, default=str)
+    producer.produce(
+        topic=KAFKA_TOPIC_INFO,
+        key=symbol,
+        value=json_value,
+        callback=delivery_report
+    )
+    
+    producer.flush()
+    logger.info(f"Sent company info for {symbol}")
+    return True
+
+def process_symbol(symbol, producer):
+    """Xử lý tất cả dữ liệu cho một mã cổ phiếu"""
+    logger.info(f"Processing all data for {symbol}")
+    
+    success = True
+    # Dữ liệu giá lịch sử
+    if not process_historical_data(symbol, producer):
+        success = False
+        
+    # Dữ liệu hành động (cổ tức, chia tách)
+    if not process_actions_data(symbol, producer):
+        # Điều này có thể không có sẵn cho tất cả các cổ phiếu, nên không coi là thất bại
+        logger.warning(f"No actions data for {symbol}")
+    
+    # Thông tin công ty
+    if not process_company_info(symbol, producer):
+        # Điều này có thể không có sẵn cho tất cả các cổ phiếu, nên không coi là thất bại
+        logger.warning(f"No company info for {symbol}")
+    
+    return success
+
+def main():
+    logger.info("Starting Financial Data Crawler with Kafka streaming")
+    
+    # Tạo Kafka producer
+    producer = create_kafka_producer()
+    
+    while True:
+        logger.info(f"Starting data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Tải các mã cổ phiếu
+        symbols = load_stock_symbols(SYMBOLS_FILE)
+        
+        # Xử lý từng mã cổ phiếu
+        for symbol in symbols:
+            symbol = symbol.strip()
+            success = process_symbol(symbol, producer)
+            if not success:
+                logger.warning(f"Failed to process symbol {symbol}")
+            
+            # Thêm độ trễ nhỏ giữa các mã cổ phiếu để tránh giới hạn tốc độ
+            time.sleep(2)
+        
+        logger.info(f"Completed data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Waiting {FETCH_INTERVAL} seconds before next cycle...")
+        
+        # Chờ đến chu kỳ tiếp theo
+        time.sleep(FETCH_INTERVAL)
+
+if __name__ == "__main__":
+    main()
