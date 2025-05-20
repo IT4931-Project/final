@@ -1,5 +1,5 @@
 docker==6.1.1
 python-dotenv==1.0.0
 schedule==1.2.0
-requests==2.29.0
+requests==2.31.0
 pymongo==4.3.3
