@@ -46,7 +46,7 @@
     "logs": "/app/logs"
   },
   "mongodb": {
-    "host": "mongodb",
+    "host": "mongo-router",
     "port": 27017,
     "database": "finance_data",
     "username": "admin",
@@ -54,7 +54,7 @@
     "auth_source": "admin"
   },
   "elasticsearch": {
-    "host": "elasticsearch",
+    "host": "elasticsearch-master",
     "port": 9200,
     "username": "elastic",
     "password": "changeme",
