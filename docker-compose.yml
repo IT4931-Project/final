@@ -8,8 +8,17 @@ services:
     container_name: finance_mongo_setup
     networks:
       - finance_network
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
     depends_on:
       - mongo-router
+      - mongo-config1
+      - mongo-config2
+      - mongo-config3
+      - mongo-shard1
+      - mongo-shard2
+    restart: "no"
   # HDFS NameNode
   namenode:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
