@@ -118,11 +118,11 @@ def process_historical_data(symbol, producer):
             record = {
                 'ticker': symbol,
                 'date': date_str,
-                'open': float(row['Open']),
-                'high': float(row['High']),
-                'low': float(row['Low']),
-                'close': float(row['Close']),
-                'volume': int(row['Volume'])
+                'open': float(row['Open'].iloc[0]) if hasattr(row['Open'], 'iloc') else float(row['Open']),
+                'high': float(row['High'].iloc[0]) if hasattr(row['High'], 'iloc') else float(row['High']),
+                'low': float(row['Low'].iloc[0]) if hasattr(row['Low'], 'iloc') else float(row['Low']),
+                'close': float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close']),
+                'volume': int(row['Volume'].iloc[0]) if hasattr(row['Volume'], 'iloc') else int(row['Volume'])
             }
             
             # Chuyển đổi thành JSON và gửi đến Kafka
@@ -165,11 +165,26 @@ def process_actions_data(symbol, producer):
                 date_str = str(row['date'])
                 
             # Tạo một bản ghi với các trường cần thiết
+            dividends = 0.0
+            stock_splits = 0.0
+            
+            if 'Dividends' in row:
+                if hasattr(row['Dividends'], 'iloc'):
+                    dividends = float(row['Dividends'].iloc[0])
+                else:
+                    dividends = float(row['Dividends'])
+                    
+            if 'Stock Splits' in row:
+                if hasattr(row['Stock Splits'], 'iloc'):
+                    stock_splits = float(row['Stock Splits'].iloc[0])
+                else:
+                    stock_splits = float(row['Stock Splits'])
+                
             record = {
                 'ticker': symbol,
                 'date': date_str,
-                'dividends': float(row['Dividends']) if 'Dividends' in row else 0.0,
-                'stock_splits': float(row['Stock Splits']) if 'Stock Splits' in row else 0.0
+                'dividends': dividends,
+                'stock_splits': stock_splits
             }
             
             # Chuyển đổi thành JSON và gửi đến Kafka
