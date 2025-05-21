@@ -125,7 +125,6 @@ services:
     networks:
       - finance_network
     restart: on-failure
-    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
       interval: 10s
@@ -145,7 +144,6 @@ services:
     networks:
       - finance_network
     restart: on-failure
-    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
       interval: 10s
@@ -165,7 +163,6 @@ services:
     networks:
       - finance_network
     restart: on-failure
-    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
       interval: 10s
