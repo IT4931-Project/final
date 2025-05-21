@@ -494,11 +494,12 @@ def main():
         logger.warning("Continuing with processing, but HDFS writes may fail")
     
     # Process symbols in parallel
-    # Convert to RDD for parallel processing
-    symbols_rdd = spark.sparkContext.parallelize(SYMBOLS, NUM_PARTITIONS)
-    
-    # Map each symbol to its processing result
-    results = symbols_rdd.map(lambda symbol: (symbol.strip(), process_symbol(spark, symbol.strip()))).collect()
+    # Process symbols sequentially on the driver
+    results = []
+    for symbol in SYMBOLS:
+        logger.info(f"Initiating processing for symbol: {symbol.strip()}")
+        success = process_symbol(spark, symbol.strip())
+        results.append((symbol.strip(), success))
     
     # Count successes
     success_count = sum(1 for _, success in results if success)
