@@ -30,22 +30,17 @@ services:
     restart: "no"
     # Add DNS options to help with hostname resolution
     dns_search: .
-    extra_hosts:
-      - "mongo-config1:mongo-config1"
-      - "mongo-config2:mongo-config2"
-      - "mongo-config3:mongo-config3"
-      - "mongo-shard1:mongo-shard1"
-      - "mongo-shard2:mongo-shard2"
-      - "mongo-router:mongo-router"
     # Use a healthcheck to ensure MongoDB services are ready
     healthcheck:
       test: "ping -c 1 mongo-config1 && ping -c 1 mongo-config2 && ping -c 1 mongo-config3"
       interval: 5s
       timeout: 10s
       retries: 5
-    # Add a small delay to ensure all MongoDB services are ready
+    # Execute initialization script with proper startup checks
     command: >
-      sh -c "sleep 10 && /scripts/wait-for-mongodb.sh python3 /scripts/mongo_init.py"
+      sh -c "sleep 10 && ping -c 1 mongo-config1 && ping -c 1 mongo-config2 && ping -c 1 mongo-config3 && 
+      ping -c 1 mongo-shard1 && ping -c 1 mongo-shard2 && ping -c 1 mongo-router && 
+      python3 /mongo_init.py"
   # HDFS NameNode
   namenode:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
@@ -130,7 +125,7 @@ services:
     networks:
       - finance_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo mongo-config1:27017/test --quiet
+      test: mongosh --quiet --eval "db.adminCommand('ping').ok" mongo-config1:27017/admin --username ${MONGO_ROOT_USERNAME} --password ${MONGO_ROOT_PASSWORD} --authenticationDatabase admin || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
@@ -155,7 +150,7 @@ services:
     networks:
       - finance_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo mongo-config2:27017/test --quiet
+      test: mongosh --quiet --eval "db.adminCommand('ping').ok" mongo-config2:27017/admin --username ${MONGO_ROOT_USERNAME} --password ${MONGO_ROOT_PASSWORD} --authenticationDatabase admin || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
@@ -180,7 +175,7 @@ services:
     networks:
       - finance_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo mongo-config3:27017/test --quiet
+      test: mongosh --quiet --eval "db.adminCommand('ping').ok" mongo-config3:27017/admin --username ${MONGO_ROOT_USERNAME} --password ${MONGO_ROOT_PASSWORD} --authenticationDatabase admin || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
@@ -204,7 +199,7 @@ services:
     networks:
       - finance_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo mongo-shard1:27017/test --quiet
+      test: mongosh --quiet --eval "db.adminCommand('ping').ok" mongo-shard1:27017/admin --username ${MONGO_ROOT_USERNAME} --password ${MONGO_ROOT_PASSWORD} --authenticationDatabase admin || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
@@ -227,7 +222,7 @@ services:
     networks:
       - finance_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo mongo-shard2:27017/test --quiet
+      test: mongosh --quiet --eval "db.adminCommand('ping').ok" mongo-shard2:27017/admin --username ${MONGO_ROOT_USERNAME} --password ${MONGO_ROOT_PASSWORD} --authenticationDatabase admin || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
@@ -253,7 +248,7 @@ services:
       - mongo-shard1
       - mongo-shard2
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo mongo-router:27017/admin --quiet
+      test: mongosh --quiet --eval "print('Connection check')" || echo 0
       interval: 10s
       timeout: 10s
       retries: 5
