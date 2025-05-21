@@ -110,9 +110,6 @@ services:
       - finance_network
     restart: unless-stopped
 
-  # No sharded cluster configuration - using single MongoDB instance
-
-
   # Zookeeper Ensemble
   zookeeper1:
     image: confluentinc/cp-zookeeper:7.2.0
@@ -127,7 +124,14 @@ services:
       ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
     networks:
       - finance_network
-    restart: unless-stopped
+    restart: on-failure
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   zookeeper2:
     image: confluentinc/cp-zookeeper:7.2.0
@@ -140,7 +144,14 @@ services:
       ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
     networks:
       - finance_network
-    restart: unless-stopped
+    restart: on-failure
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   zookeeper3:
     image: confluentinc/cp-zookeeper:7.2.0
@@ -153,7 +164,14 @@ services:
       ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
     networks:
       - finance_network
-    restart: unless-stopped
+    restart: on-failure
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Kafka Broker 1
   kafka-broker1:
