@@ -46,21 +46,51 @@ def connect_with_retry(mongo_url, max_attempts=MAX_RETRY_ATTEMPTS, interval=RETR
             client.admin.command('ping')
             logger.info(f"Successfully connected to {host_details}")
             return client
+        except errors.OperationFailure as e:
+            # Special handling for configsvr errors
+            if "Cannot start a configsvr as a standalone server" in str(e):
+                logger.warning(f"Config server not initialized as replica set yet: {str(e)}")
+                logger.info("Waiting for config server to be properly initialized...")
+                attempts += 1
+                time.sleep(interval * 2)  # Wait longer for replica set issues
+            else:
+                attempts += 1
+                logger.warning(f"MongoDB operation failure on {host_details}: {str(e)}")
+                time.sleep(interval)
         except Exception as e:
             attempts += 1
             logger.warning(f"Failed to connect to {host_details}: {str(e)}")
-            if attempts >= max_attempts:
-                logger.error(f"Could not connect to {host_details} after {max_attempts} attempts")
-                raise
             time.sleep(interval)
+            
+        if attempts >= max_attempts:
+            logger.error(f"Could not connect to {host_details} after {max_attempts} attempts")
+            raise
 
 def init_config_server_replica_set():
     """Initialize the config server replica set"""
     logger.info("=== CONFIGURING CONFIG SERVER REPLICA SET ===")
     
+    # First wait a bit to ensure config servers are fully started
+    logger.info("Waiting for config servers to be fully initialized...")
+    time.sleep(15)
+    
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info(f"Config server initialization attempt {attempt}/{max_attempts}")
+            client = connect_with_retry(CONFIG_SERVER_URL)
+            admin_db = client.admin
+            break
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.warning(f"Failed to initialize config servers (attempt {attempt}): {str(e)}")
+                logger.info(f"Waiting before retrying config server initialization...")
+                time.sleep(10)
+            else:
+                logger.error(f"Failed to initialize config servers after {max_attempts} attempts")
+                raise
+    
     try:
-        client = connect_with_retry(CONFIG_SERVER_URL)
-        admin_db = client.admin
         
         # Check if replica set already initialized
         try:
@@ -118,9 +148,27 @@ def init_shard_replica_set(shard_number, shard_url):
     """Initialize a shard replica set"""
     logger.info(f"=== CONFIGURING SHARD{shard_number} REPLICA SET ===")
     
+    # First wait to ensure shard servers are fully started
+    logger.info(f"Waiting for shard{shard_number} server to be fully initialized...")
+    time.sleep(10)
+    
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info(f"Shard{shard_number} initialization attempt {attempt}/{max_attempts}")
+            client = connect_with_retry(shard_url)
+            admin_db = client.admin
+            break
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.warning(f"Failed to initialize shard{shard_number} (attempt {attempt}): {str(e)}")
+                logger.info(f"Waiting before retrying shard{shard_number} initialization...")
+                time.sleep(10)
+            else:
+                logger.error(f"Failed to initialize shard{shard_number} after {max_attempts} attempts")
+                raise
+    
     try:
-        client = connect_with_retry(shard_url)
-        admin_db = client.admin
         
         # Check if replica set already initialized
         try:
@@ -462,7 +510,7 @@ def main():
         
         # Wait for MongoDB services to start
         logger.info("Waiting for MongoDB services to be available...")
-        time.sleep(30)
+        time.sleep(60)  # Increased wait time to ensure all MongoDB servers are ready
         
         # Step 1: Initialize config server replica set
         init_config_server_replica_set()
