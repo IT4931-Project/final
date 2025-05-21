@@ -108,25 +108,35 @@ def process_historical_data(symbol, producer):
     count = 0
     for _, row in df.iterrows():
         # Tạo một bản ghi với các trường cần thiết
-        record = {
-            'ticker': symbol,
-            'date': row['Date'].strftime('%Y-%m-%d'),
-            'open': float(row['Open']),
-            'high': float(row['High']),
-            'low': float(row['Low']),
-            'close': float(row['Close']),
-            'volume': int(row['Volume'])
-        }
-        
-        # Chuyển đổi thành JSON và gửi đến Kafka
-        json_value = json.dumps(record)
-        producer.produce(
-            topic=KAFKA_TOPIC_OHLCV,
-            key=symbol,
-            value=json_value,
-            callback=delivery_report
-        )
-        count += 1
+        try:
+            # Try to format the date, handle different possible types
+            if hasattr(row['Date'], 'strftime'):
+                date_str = row['Date'].strftime('%Y-%m-%d')
+            else:
+                date_str = str(row['Date'])
+                
+            record = {
+                'ticker': symbol,
+                'date': date_str,
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close']),
+                'volume': int(row['Volume'])
+            }
+            
+            # Chuyển đổi thành JSON và gửi đến Kafka
+            json_value = json.dumps(record)
+            producer.produce(
+                topic=KAFKA_TOPIC_OHLCV,
+                key=symbol,
+                value=json_value,
+                callback=delivery_report
+            )
+            count += 1
+        except Exception as e:
+            logger.error(f"Error processing row for {symbol}: {e}")
+            continue
     
     producer.flush()
     logger.info(f"Sent {count} historical data records for {symbol}")
@@ -147,23 +157,33 @@ def process_actions_data(symbol, producer):
     # Gửi từng dòng đến Kafka
     count = 0
     for _, row in df.iterrows():
-        # Tạo một bản ghi với các trường cần thiết
-        record = {
-            'ticker': symbol,
-            'date': row['date'].strftime('%Y-%m-%d'),
-            'dividends': float(row['Dividends']) if 'Dividends' in row else 0.0,
-            'stock_splits': float(row['Stock Splits']) if 'Stock Splits' in row else 0.0
-        }
-        
-        # Chuyển đổi thành JSON và gửi đến Kafka
-        json_value = json.dumps(record)
-        producer.produce(
-            topic=KAFKA_TOPIC_ACTIONS,
-            key=symbol,
-            value=json_value,
-            callback=delivery_report
-        )
-        count += 1
+        try:
+            # Try to format the date, handle different possible types
+            if hasattr(row['date'], 'strftime'):
+                date_str = row['date'].strftime('%Y-%m-%d')
+            else:
+                date_str = str(row['date'])
+                
+            # Tạo một bản ghi với các trường cần thiết
+            record = {
+                'ticker': symbol,
+                'date': date_str,
+                'dividends': float(row['Dividends']) if 'Dividends' in row else 0.0,
+                'stock_splits': float(row['Stock Splits']) if 'Stock Splits' in row else 0.0
+            }
+            
+            # Chuyển đổi thành JSON và gửi đến Kafka
+            json_value = json.dumps(record)
+            producer.produce(
+                topic=KAFKA_TOPIC_ACTIONS,
+                key=symbol,
+                value=json_value,
+                callback=delivery_report
+            )
+            count += 1
+        except Exception as e:
+            logger.error(f"Error processing actions row for {symbol}: {e}")
+            continue
     
     producer.flush()
     logger.info(f"Sent {count} actions records for {symbol}")
@@ -199,19 +219,23 @@ def process_symbol(symbol, producer):
     logger.info(f"Processing all data for {symbol}")
     
     success = True
-    # Dữ liệu giá lịch sử
-    if not process_historical_data(symbol, producer):
-        success = False
+    try:
+        # Dữ liệu giá lịch sử
+        if not process_historical_data(symbol, producer):
+            success = False
+            
+        # Dữ liệu hành động (cổ tức, chia tách)
+        if not process_actions_data(symbol, producer):
+            # Điều này có thể không có sẵn cho tất cả các cổ phiếu, nên không coi là thất bại
+            logger.warning(f"No actions data for {symbol}")
         
-    # Dữ liệu hành động (cổ tức, chia tách)
-    if not process_actions_data(symbol, producer):
-        # Điều này có thể không có sẵn cho tất cả các cổ phiếu, nên không coi là thất bại
-        logger.warning(f"No actions data for {symbol}")
-    
-    # Thông tin công ty
-    if not process_company_info(symbol, producer):
-        # Điều này có thể không có sẵn cho tất cả các cổ phiếu, nên không coi là thất bại
-        logger.warning(f"No company info for {symbol}")
+        # Thông tin công ty
+        if not process_company_info(symbol, producer):
+            # Điều này có thể không có sẵn cho tất cả các cổ phiếu, nên không coi là thất bại
+            logger.warning(f"No company info for {symbol}")
+    except Exception as e:
+        logger.error(f"Error processing symbol {symbol}: {e}")
+        success = False
     
     return success
 
@@ -222,26 +246,31 @@ def main():
     producer = create_kafka_producer()
     
     while True:
-        logger.info(f"Starting data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        # Tải các mã cổ phiếu
-        symbols = load_stock_symbols(SYMBOLS_FILE)
-        
-        # Xử lý từng mã cổ phiếu
-        for symbol in symbols:
-            symbol = symbol.strip()
-            success = process_symbol(symbol, producer)
-            if not success:
-                logger.warning(f"Failed to process symbol {symbol}")
+        try:
+            logger.info(f"Starting data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Thêm độ trễ nhỏ giữa các mã cổ phiếu để tránh giới hạn tốc độ
-            time.sleep(2)
-        
-        logger.info(f"Completed data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"Waiting {FETCH_INTERVAL} seconds before next cycle...")
-        
-        # Chờ đến chu kỳ tiếp theo
-        time.sleep(FETCH_INTERVAL)
+            # Tải các mã cổ phiếu
+            symbols = load_stock_symbols(SYMBOLS_FILE)
+            
+            # Xử lý từng mã cổ phiếu
+            for symbol in symbols:
+                symbol = symbol.strip()
+                success = process_symbol(symbol, producer)
+                if not success:
+                    logger.warning(f"Failed to process symbol {symbol}")
+                
+                # Thêm độ trễ nhỏ giữa các mã cổ phiếu để tránh giới hạn tốc độ
+                time.sleep(2)
+            
+            logger.info(f"Completed data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"Waiting {FETCH_INTERVAL} seconds before next cycle...")
+            
+            # Chờ đến chu kỳ tiếp theo
+            time.sleep(FETCH_INTERVAL)
+        except Exception as e:
+            logger.error(f"Error in main loop: {e}")
+            # Add a delay before retrying
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
