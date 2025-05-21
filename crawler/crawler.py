@@ -45,8 +45,8 @@ KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
 KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
 
 # stock symbols
-SYMBOLS_FILE = os.getenv('STOCK_SYMBOLS_FILE', '/data/stockList.csv')
-RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/data/raw')
+SYMBOLS_FILE = os.getenv('STOCK_SYMBOLS_FILE', '/app/data/stockList.csv')
+RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
 FETCH_INTERVAL = int(os.getenv('FETCH_INTERVAL', '86400'))  # Default: 24 hours
 
 def delivery_report(err, msg):

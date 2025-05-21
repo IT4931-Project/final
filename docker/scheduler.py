@@ -64,15 +64,21 @@ def run_container(service_name):
         # Execute a new container instance with the same configuration as in docker-compose
         # This triggers a job run without modifications to the original setup
         logger.info(f"Creating and starting container {container_name}...")
+        
+        # Use the correct image name with hyphen instead of underscore
+        image_name = f"final-{service_name}:latest"
+        logger.info(f"Using image: {image_name}")
+        
+        # Run the container with the correct image name
         new_container = client.containers.run(
-            f"final_{service_name}:latest",
+            image_name,
             name=container_name,
             detach=True,
             network="finance_network",
             volumes={
-                '/app': {'bind': f'/app', 'mode': 'rw'},
-                '/app/data': {'bind': f'/app/data', 'mode': 'rw'},
-                '/app/logs': {'bind': f'/app/logs', 'mode': 'rw'},
+                '/app/data': {'bind': '/app/data', 'mode': 'rw'},
+                '/app/logs': {'bind': '/app/logs', 'mode': 'rw'},
+                '/app/configs': {'bind': '/app/configs', 'mode': 'rw'}
             }
         )
         
@@ -81,7 +87,14 @@ def run_container(service_name):
         
     except Exception as e:
         logger.error(f"Error running {service_name} job: {str(e)}")
-        return False
+        # Fallback to docker-compose if direct container run fails
+        try:
+            logger.info(f"Attempting to use docker-compose to start {service_name} service...")
+            os.system(f"docker-compose up -d {service_name}")
+            return True
+        except Exception as compose_error:
+            logger.error(f"Docker-compose attempt also failed: {str(compose_error)}")
+            return False
 
 def run_crawler_job():
     """Run the crawler job to fetch financial data"""
