@@ -508,9 +508,22 @@ def main():
     try:
         logger.info("Starting MongoDB Sharded Cluster Setup and Optimization")
         
-        # Wait for MongoDB services to start
-        logger.info("Waiting for MongoDB services to be available...")
-        time.sleep(60)  # Increased wait time to ensure all MongoDB servers are ready
+        # Wait for MongoDB services to start and DNS to resolve
+        logger.info("Waiting for MongoDB services to be available and DNS resolution...")
+        time.sleep(90)  # Increased wait time for DNS resolution and MongoDB startup
+        
+        # Verify DNS resolution for the MongoDB hosts
+        import socket
+        hosts_to_check = ["mongo-config1", "mongo-config2", "mongo-config3", 
+                         "mongo-shard1", "mongo-shard2", "mongo-router"]
+        
+        for host in hosts_to_check:
+            try:
+                logger.info(f"Resolving hostname {host}...")
+                ip_address = socket.gethostbyname(host)
+                logger.info(f"Successfully resolved {host} to {ip_address}")
+            except socket.gaierror as e:
+                logger.warning(f"Could not resolve {host}: {str(e)}")
         
         # Step 1: Initialize config server replica set
         init_config_server_replica_set()
