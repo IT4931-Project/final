@@ -22,7 +22,7 @@ logger = logging.getLogger("kafka_setup")
 load_dotenv()
 
 # Cấu hình Kafka
-KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092')
+KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092,kafka-broker2:9093')
 KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC', 'stock_ohlcv')
 KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
 KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
@@ -44,46 +44,46 @@ def create_topics():
     if KAFKA_TOPIC_OHLCV not in existing_topics:
         topics_to_create.append(NewTopic(
             KAFKA_TOPIC_OHLCV,
-            num_partitions=3,  # Nhiều partition để có thể mở rộng
-            replication_factor=3,  # Đặt bằng 3 để tận dụng cả 3 broker 
+            num_partitions=2,  # Reduced number of partitions
+            replication_factor=2,  # Reduced to 2 to match our broker count
             config={
-                'retention.ms': str(7 * 24 * 60 * 60 * 1000),  # Giữ lại dữ liệu 7 ngày
+                'retention.ms': str(7 * 24 * 60 * 60 * 1000),  # Keep data for 7 days
                 'cleanup.policy': 'delete',
-                'min.insync.replicas': '2',  # Yêu cầu ít nhất 2 replica báo nhận write
-                'unclean.leader.election.enable': 'false'  # Ngăn chặn bầu leader không đồng bộ
+                'min.insync.replicas': '1',  # Require only 1 replica to acknowledge
+                'unclean.leader.election.enable': 'false'  # Prevent unclean leader election
             }
         ))
-        logger.info(f"Will create topic {KAFKA_TOPIC_OHLCV} with 3x replication")
+        logger.info(f"Will create topic {KAFKA_TOPIC_OHLCV} with 2x replication")
     
     # Topic Actions
     if KAFKA_TOPIC_ACTIONS not in existing_topics:
         topics_to_create.append(NewTopic(
             KAFKA_TOPIC_ACTIONS,
             num_partitions=2,
-            replication_factor=3,  # Tăng từ 1 lên 3
+            replication_factor=2,  # Reduced to 2 to match our broker count
             config={
-                'retention.ms': str(30 * 24 * 60 * 60 * 1000),  # Giữ lại dữ liệu 30 ngày
+                'retention.ms': str(30 * 24 * 60 * 60 * 1000),  # Keep data for 30 days
                 'cleanup.policy': 'delete',
-                'min.insync.replicas': '2',
+                'min.insync.replicas': '1',
                 'unclean.leader.election.enable': 'false'
             }
         ))
-        logger.info(f"Will create topic {KAFKA_TOPIC_ACTIONS} with 3x replication")
+        logger.info(f"Will create topic {KAFKA_TOPIC_ACTIONS} with 2x replication")
     
     # Topic Info
     if KAFKA_TOPIC_INFO not in existing_topics:
         topics_to_create.append(NewTopic(
             KAFKA_TOPIC_INFO,
-            num_partitions=1,  # Dự kiến khối lượng thấp hơn
-            replication_factor=3,  # Tăng từ 1 lên 3
+            num_partitions=1,  # Expected lower volume
+            replication_factor=2,  # Reduced to 2 to match our broker count
             config={
-                'retention.ms': str(90 * 24 * 60 * 60 * 1000),  # Giữ lại dữ liệu 90 ngày
+                'retention.ms': str(90 * 24 * 60 * 60 * 1000),  # Keep data for 90 days
                 'cleanup.policy': 'delete',
-                'min.insync.replicas': '2',
+                'min.insync.replicas': '1',
                 'unclean.leader.election.enable': 'false'
             }
         ))
-        logger.info(f"Will create topic {KAFKA_TOPIC_INFO} with 3x replication")
+        logger.info(f"Will create topic {KAFKA_TOPIC_INFO} with 2x replication")
     
     # Tạo các topic
     if topics_to_create:

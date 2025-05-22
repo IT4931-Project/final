@@ -110,18 +110,16 @@ services:
       - finance_network
     restart: unless-stopped
 
-  # Zookeeper Ensemble
-  zookeeper1:
+  # Single Zookeeper instance (simplified)
+  zookeeper:
     image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper1
-    container_name: finance_zookeeper1
+    hostname: zookeeper
+    container_name: finance_zookeeper
     ports:
       - '2181:2181'
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 1
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
     networks:
       - finance_network
     restart: on-failure
@@ -132,123 +130,52 @@ services:
       retries: 5
       start_period: 30s
 
-  zookeeper2:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper2
-    container_name: finance_zookeeper2
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 2
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  zookeeper3:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper3
-    container_name: finance_zookeeper3
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 3
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # Kafka Broker 1
+  # Kafka Brokers (reduced to 2 from 3)
   kafka-broker1:
     image: confluentinc/cp-kafka:7.2.0
     hostname: kafka-broker1
     container_name: finance_kafka_broker1
     depends_on:
-      - zookeeper1
-      - zookeeper2
-      - zookeeper3
+      - zookeeper
     ports:
       - '9092:9092'
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - finance_network
     restart: unless-stopped
 
-  # Kafka Broker 2
   kafka-broker2:
     image: confluentinc/cp-kafka:7.2.0
     hostname: kafka-broker2
     container_name: finance_kafka_broker2
     depends_on:
-      - zookeeper1
-      - zookeeper2
-      - zookeeper3
+      - zookeeper
     ports:
       - '9093:9093'
     environment:
       KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    networks:
-      - finance_network
-    restart: unless-stopped
-
-  # Kafka Broker 3
-  kafka-broker3:
-    image: confluentinc/cp-kafka:7.2.0
-    hostname: kafka-broker3
-    container_name: finance_kafka_broker3
-    depends_on:
-      - zookeeper1
-      - zookeeper2
-      - zookeeper3
-    ports:
-      - '9094:9094'
-    environment:
-      KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - finance_network
@@ -487,7 +414,6 @@ services:
       - mongodb
       - kafka-broker1
       - kafka-broker2
-      - kafka-broker3
 
   # Kafka Consumer Service
   kafka-consumer:
@@ -505,7 +431,6 @@ services:
     depends_on:
       - kafka-broker1
       - kafka-broker2
-      - kafka-broker3
       - mongodb
 
   # ETL Service
