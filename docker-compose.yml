@@ -135,7 +135,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_ZOOKEEPER_CONNECT: ""
+      KAFKA_ZOOKEEPER_CONNECT: "ignored:2181"
     networks:
       - finance_network
     restart: unless-stopped
@@ -164,7 +164,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_ZOOKEEPER_CONNECT: ""
+      KAFKA_ZOOKEEPER_CONNECT: "ignored:2181"
     networks:
       - finance_network
     restart: unless-stopped
@@ -193,7 +193,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_ZOOKEEPER_CONNECT: ""
+      KAFKA_ZOOKEEPER_CONNECT: "ignored:2181"
     networks:
       - finance_network
     restart: unless-stopped
