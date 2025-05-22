@@ -110,85 +110,26 @@ services:
       - finance_network
     restart: unless-stopped
 
-  # Zookeeper Ensemble
-  zookeeper1:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper1
-    container_name: finance_zookeeper1
-    ports:
-      - '2181:2181'
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 1
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  zookeeper2:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper2
-    container_name: finance_zookeeper2
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 2
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  zookeeper3:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper3
-    container_name: finance_zookeeper3
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 3
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # Kafka Broker 1
+# Zookeeper services removed for KRaft mode
+  # Kafka Broker 1 (KRaft Mode)
   kafka-broker1:
     image: confluentinc/cp-kafka:7.2.0
     hostname: kafka-broker1
     container_name: finance_kafka_broker1
-    depends_on:
-      - zookeeper1
-      - zookeeper2
-      - zookeeper3
     ports:
-      - '9092:9092'
+      - '9092:9092' # Client port
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092
+      KAFKA_NODE_ID: 1 # For KRaft
+      KAFKA_CLUSTER_ID: "KraftCluster12345FinanceProject" # KRaft Cluster ID
+      KAFKA_PROCESS_ROLES: 'broker,controller' # Combined mode
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092,CONTROLLER://kafka-broker1:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092,CONTROLLER://kafka-broker1:19092'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-broker1:19092,2@kafka-broker2:19093,3@kafka-broker3:19094'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
@@ -198,25 +139,25 @@ services:
       - finance_network
     restart: unless-stopped
 
-  # Kafka Broker 2
+  # Kafka Broker 2 (KRaft Mode)
   kafka-broker2:
     image: confluentinc/cp-kafka:7.2.0
     hostname: kafka-broker2
     container_name: finance_kafka_broker2
-    depends_on:
-      - zookeeper1
-      - zookeeper2
-      - zookeeper3
     ports:
-      - '9093:9093'
+      - '9093:9093' # Client port
     environment:
       KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093
+      KAFKA_NODE_ID: 2 # For KRaft
+      KAFKA_CLUSTER_ID: "KraftCluster12345FinanceProject" # KRaft Cluster ID
+      KAFKA_PROCESS_ROLES: 'broker,controller' # Combined mode
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093,CONTROLLER://kafka-broker2:19093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093,CONTROLLER://kafka-broker2:19093'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-broker1:19092,2@kafka-broker2:19093,3@kafka-broker3:19094'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
@@ -226,25 +167,25 @@ services:
       - finance_network
     restart: unless-stopped
 
-  # Kafka Broker 3
+  # Kafka Broker 3 (KRaft Mode)
   kafka-broker3:
     image: confluentinc/cp-kafka:7.2.0
     hostname: kafka-broker3
     container_name: finance_kafka_broker3
-    depends_on:
-      - zookeeper1
-      - zookeeper2
-      - zookeeper3
     ports:
-      - '9094:9094'
+      - '9094:9094' # Client port
     environment:
       KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094
+      KAFKA_NODE_ID: 3 # For KRaft
+      KAFKA_CLUSTER_ID: "KraftCluster12345FinanceProject" # KRaft Cluster ID
+      KAFKA_PROCESS_ROLES: 'broker,controller' # Combined mode
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094,CONTROLLER://kafka-broker3:19094'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094,CONTROLLER://kafka-broker3:19094'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-broker1:19092,2@kafka-broker2:19093,3@kafka-broker3:19094'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3

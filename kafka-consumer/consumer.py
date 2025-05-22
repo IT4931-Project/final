@@ -29,20 +29,39 @@ logger = logging.getLogger("kafka_consumer")
 # Tải biến môi trường
 load_dotenv()
 
+# Load application configuration
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/app/configs/config.json')
+try:
+    with open(CONFIG_FILE_PATH, 'r') as f:
+        APP_CONFIG = json.load(f)
+    logger.info(f"Successfully loaded configuration from {CONFIG_FILE_PATH}")
+except FileNotFoundError:
+    logger.error(f"Configuration file not found at {CONFIG_FILE_PATH}. Exiting.")
+    exit(1)
+except json.JSONDecodeError:
+    logger.error(f"Error decoding JSON from {CONFIG_FILE_PATH}. Exiting.")
+    exit(1)
+
+KAFKA_CONFIG = APP_CONFIG.get('kafka', {})
+MONGO_CONFIG = APP_CONFIG.get('mongodb', {})
+
 # Cấu hình Kafka
-KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092')
-KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC', 'stock_ohlcv')
-KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
-KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
-KAFKA_GROUP_ID = os.getenv('KAFKA_GROUP_ID', 'stock_consumer_group')
-KAFKA_AUTO_OFFSET_RESET = os.getenv('KAFKA_AUTO_OFFSET_RESET', 'earliest')
+KAFKA_BOOTSTRAP_SERVERS = KAFKA_CONFIG.get('bootstrap_servers', 'kafka-broker1:9092,kafka-broker2:9093,kafka-broker3:9094')
+KAFKA_CLIENT_ID = KAFKA_CONFIG.get('client_id', 'kafka_consumer_client') # Added client_id for consumer
+TOPIC_PREFIX = KAFKA_CONFIG.get('topic_prefix', 'finance.')
+
+KAFKA_TOPIC_OHLCV = f"{TOPIC_PREFIX}stock_ohlcv"
+KAFKA_TOPIC_ACTIONS = f"{TOPIC_PREFIX}stock_actions"
+KAFKA_TOPIC_INFO = f"{TOPIC_PREFIX}stock_info"
+KAFKA_GROUP_ID = KAFKA_CONFIG.get('group_id', 'stock_consumer_group') # Allow overriding group_id via config
+KAFKA_AUTO_OFFSET_RESET = os.getenv('KAFKA_AUTO_OFFSET_RESET', 'earliest') # Keep as env var or add to config if needed
 
 # Cấu hình MongoDB
-MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
-MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
-MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
-MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
-MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
+MONGO_HOST = MONGO_CONFIG.get('host', 'mongodb')
+MONGO_PORT = int(MONGO_CONFIG.get('port', 27017))
+MONGO_DATABASE = MONGO_CONFIG.get('database', 'finance_data')
+MONGO_USERNAME = MONGO_CONFIG.get('username', 'admin')
+MONGO_PASSWORD = MONGO_CONFIG.get('password', 'password') # Consider using secrets for passwords
 
 def connect_to_mongodb():
     """
@@ -80,7 +99,8 @@ def create_kafka_consumer():
     consumer_conf = {
         'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
         'group.id': KAFKA_GROUP_ID,
-        'auto.offset.reset': KAFKA_AUTO_OFFSET_RESET
+        'auto.offset.reset': KAFKA_AUTO_OFFSET_RESET,
+        'client.id': KAFKA_CLIENT_ID  # Added client.id to consumer config
     }
     consumer = Consumer(consumer_conf)
     

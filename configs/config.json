@@ -64,6 +64,11 @@
     "host": "kibana",
     "port": 5601
   },
+  "kafka": {
+    "bootstrap_servers": "kafka-broker1:9092,kafka-broker2:9093,kafka-broker3:9094",
+    "client_id": "finance_app_client",
+    "topic_prefix": "finance."
+  },
   "spark": {
     "master": "spark://spark-master:7077",
     "executor_memory": "1g",

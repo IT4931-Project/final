@@ -38,11 +38,27 @@ logger = logging.getLogger("crawler")
 # load env
 load_dotenv()
 
-# config kafka
-KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092')
-KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC', 'stock_ohlcv')
-KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
-KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
+# Load application configuration
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', '/app/configs/config.json')
+try:
+    with open(CONFIG_FILE_PATH, 'r') as f:
+        APP_CONFIG = json.load(f)
+    logger.info(f"Successfully loaded configuration from {CONFIG_FILE_PATH}")
+except FileNotFoundError:
+    logger.error(f"Configuration file not found at {CONFIG_FILE_PATH}. Exiting.")
+    exit(1)
+except json.JSONDecodeError:
+    logger.error(f"Error decoding JSON from {CONFIG_FILE_PATH}. Exiting.")
+    exit(1)
+
+KAFKA_CONFIG = APP_CONFIG.get('kafka', {})
+KAFKA_BOOTSTRAP_SERVERS = KAFKA_CONFIG.get('bootstrap_servers', 'kafka-broker1:9092,kafka-broker2:9093,kafka-broker3:9094')
+KAFKA_CLIENT_ID = KAFKA_CONFIG.get('client_id', 'crawler_client')
+TOPIC_PREFIX = KAFKA_CONFIG.get('topic_prefix', 'finance.')
+
+KAFKA_TOPIC_OHLCV = f"{TOPIC_PREFIX}stock_ohlcv"
+KAFKA_TOPIC_ACTIONS = f"{TOPIC_PREFIX}stock_actions"
+KAFKA_TOPIC_INFO = f"{TOPIC_PREFIX}stock_info"
 
 # stock symbols
 SYMBOLS_FILE = os.getenv('STOCK_SYMBOLS_FILE', '/app/data/stockList.csv')
@@ -59,7 +75,8 @@ def delivery_report(err, msg):
 def create_kafka_producer():
     """create kafka producer"""
     producer_conf = {
-        'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS
+        'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+        'client.id': KAFKA_CLIENT_ID
     }
     return Producer(producer_conf)
 
