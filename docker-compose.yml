@@ -121,45 +121,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
       ZOOKEEPER_SERVER_ID: 1
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  zookeeper2:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper2
-    container_name: finance_zookeeper2
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 2
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
-    networks:
-      - finance_network
-    restart: on-failure
-    healthcheck:
-      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  zookeeper3:
-    image: confluentinc/cp-zookeeper:7.2.0
-    hostname: zookeeper3
-    container_name: finance_zookeeper3
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 3
-      ZOOKEEPER_SERVERS: zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
+      ZOOKEEPER_SERVERS: zookeeper1:2888:3888
     networks:
       - finance_network
     restart: on-failure
@@ -177,13 +139,11 @@ services:
     container_name: finance_kafka_broker1
     depends_on:
       - zookeeper1
-      - zookeeper2
-      - zookeeper3
     ports:
       - '9092:9092'
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker1:29092,PLAINTEXT_HOST://kafka-broker1:9092
@@ -205,13 +165,11 @@ services:
     container_name: finance_kafka_broker2
     depends_on:
       - zookeeper1
-      - zookeeper2
-      - zookeeper3
     ports:
       - '9093:9093'
     environment:
       KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker2:29093,PLAINTEXT_HOST://kafka-broker2:9093
@@ -233,13 +191,11 @@ services:
     container_name: finance_kafka_broker3
     depends_on:
       - zookeeper1
-      - zookeeper2
-      - zookeeper3
     ports:
       - '9094:9094'
     environment:
       KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181,zookeeper2:2181,zookeeper3:2181"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper1:2181"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker3:29094,PLAINTEXT_HOST://kafka-broker3:9094
