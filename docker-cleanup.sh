@@ -19,7 +19,7 @@ echo "  - Remove all containers"
 echo "  - Prune all networks (except default: bridge, host, none)"
 echo "  - Prune all volumes"
 echo "  - Prune all build cache"
-echo "  - Remove Docker images older than 48 hours"
+echo "  - Remove Docker images newer than 48 hours (created in the last 2 days)"
 echo "  - Remove Docker images tagged as <none> (dangling images)"
 echo ""
 read -p "Are you sure you want to continue? (y/N): " -n 1 -r
@@ -52,10 +52,10 @@ docker builder prune --all --force 2>/dev/null || echo "  No build cache to remo
 echo ""
 echo "📦 Removing specific Docker images..."
 
-echo "  Attempting to remove images older than 48 hours..."
+echo "  Attempting to remove images newer than 48 hours (created in the last 2 days)..."
 # This command removes all images (dangling or not, used by other images or not, as long as not used by containers)
-# created more than 48 hours ago. Since containers are already removed, this should be effective.
-docker image prune -a --force --filter "until=48h" 2>/dev/null || echo "  No images older than 48 hours found, or an error occurred."
+# created since 48 hours ago (i.e., in the last 2 days). Since containers are already removed, this should be effective.
+docker image prune -a --force --filter "since=48h" 2>/dev/null || echo "  No images newer than 48 hours found, or an error occurred."
 
 echo "  Attempting to remove <none> (dangling) images..."
 # This command removes all dangling images.
@@ -71,4 +71,4 @@ echo "  Networks: $(docker network ls --format '{{.Name}}' | grep -vE '^(bridge|
 
 echo ""
 echo "✅ Docker cleanup process completed."
-echo "💡 Targeted images (older than 48h, <none>) and other Docker resources have been processed."
+echo "💡 Targeted images (newer than 48h, <none>) and other Docker resources have been processed."
