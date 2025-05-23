@@ -476,7 +476,6 @@ services:
       dockerfile: Dockerfile
     container_name: finance_crawler
     volumes:
-      - ./data:/app/data
       - ./logs:/app/logs
       - ./configs:/app/configs
     env_file:

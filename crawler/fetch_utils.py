@@ -9,7 +9,14 @@ import logging
 import pandas as pd
 import yfinance as yf
 import datetime
-from typing import Optional, Dict, Any
+import requests
+import tempfile
+import csv
+from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Thiết lập logging
 logger = logging.getLogger("fetch_utils")
@@ -170,25 +177,137 @@ def fetch_stock_financials(ticker_symbol: str) -> Optional[Dict[str, pd.DataFram
         logger.error(f"Error fetching financials for {ticker_symbol}: {e}")
         return None
 
-def load_stock_symbols(symbols_file: str) -> list:
+def download_file_from_google_drive(file_id: str, destination: str) -> bool:
     """
-    Tải các mã cổ phiếu từ file CSV
-
-    Tham số:
-        symbols_file (str): Đường dẫn đến file CSV chứa các mã cổ phiếu
-
-    Trả về:
-        list: Danh sách các mã cổ phiếu
+    Download a file from Google Drive using the file ID
+    
+    Args:
+        file_id (str): Google Drive file ID
+        destination (str): Local path where the file should be saved
+        
+    Returns:
+        bool: True if download successful, False otherwise
     """
     try:
-        if not os.path.exists(symbols_file):
-            logger.warning(f"Symbols file {symbols_file} not found, using default symbols")
-            return ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'TSLA']
+        # Google Drive download URL for public files
+        download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         
-        df = pd.read_csv(symbols_file)
-        symbols = df['Symbol'].tolist()
-        logger.info(f"Loaded {len(symbols)} symbols from {symbols_file}")
-        return symbols
+        logger.info(f"Downloading file from Google Drive: {file_id}")
+        
+        # Create a session to handle redirects
+        session = requests.Session()
+        
+        # First request to get the file
+        response = session.get(download_url, stream=True)
+        response.raise_for_status()
+        
+        # Check if we need to handle the virus scan warning
+        if 'virus scan warning' in response.text.lower():
+            # Extract the confirm token from the response
+            for line in response.text.splitlines():
+                if 'confirm=' in line:
+                    confirm_token = line.split('confirm=')[1].split('&')[0].split('"')[0]
+                    break
+            else:
+                confirm_token = None
+            
+            if confirm_token:
+                # Make another request with the confirm token
+                download_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
+                response = session.get(download_url, stream=True)
+                response.raise_for_status()
+        
+        # Write the file to destination
+        with open(destination, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        
+        logger.info(f"Successfully downloaded file to {destination}")
+        return True
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error downloading file from Google Drive: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Error loading symbols from {symbols_file}: {e}")
-        return ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'TSLA']
+        logger.error(f"Error downloading file from Google Drive: {e}")
+        return False
+
+def load_stock_symbols_from_google_drive() -> List[str]:
+    """
+    Load stock symbols from Google Drive CSV file
+    
+    Returns:
+        List[str]: List of stock symbols
+    """
+    try:
+        # Get Google Drive configuration from environment variables
+        file_id = os.getenv('GOOGLE_DRIVE_FILE_ID')
+        
+        if not file_id:
+            logger.error("GOOGLE_DRIVE_FILE_ID not found in environment variables")
+            return get_default_symbols()
+        
+        # Create a temporary file to store the downloaded CSV
+        with tempfile.NamedTemporaryFile(mode='w+b', suffix='.csv', delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        try:
+            # Download the file from Google Drive
+            if not download_file_from_google_drive(file_id, temp_path):
+                logger.error("Failed to download symbols file from Google Drive")
+                return get_default_symbols()
+            
+            # Read the CSV file
+            df = pd.read_csv(temp_path)
+            
+            # Extract symbols from the 'Symbol' column
+            if 'Symbol' not in df.columns:
+                logger.error("'Symbol' column not found in the downloaded CSV file")
+                return get_default_symbols()
+            
+            symbols = df['Symbol'].dropna().astype(str).tolist()
+            
+            # Remove any empty strings or whitespace-only symbols
+            symbols = [symbol.strip() for symbol in symbols if symbol.strip()]
+            
+            logger.info(f"Successfully loaded {len(symbols)} symbols from Google Drive")
+            return symbols
+            
+        finally:
+            # Clean up the temporary file
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"Cleaned up temporary file: {temp_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up temporary file {temp_path}: {cleanup_error}")
+        
+    except Exception as e:
+        logger.error(f"Error loading symbols from Google Drive: {e}")
+        return get_default_symbols()
+
+def get_default_symbols() -> List[str]:
+    """
+    Get default stock symbols as fallback
+    
+    Returns:
+        List[str]: List of default stock symbols
+    """
+    default_symbols = ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX', 'ADBE', 'CRM']
+    logger.info(f"Using default symbols: {default_symbols}")
+    return default_symbols
+
+def load_stock_symbols(symbols_file: str = None) -> List[str]:
+    """
+    Load stock symbols from Google Drive (symbols_file parameter is kept for backward compatibility but ignored)
+    
+    Args:
+        symbols_file (str, optional): Deprecated parameter, kept for backward compatibility
+        
+    Returns:
+        List[str]: List of stock symbols
+    """
+    if symbols_file:
+        logger.warning("symbols_file parameter is deprecated. Loading symbols from Google Drive instead.")
+    
+    return load_stock_symbols_from_google_drive()

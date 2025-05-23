@@ -44,9 +44,7 @@ KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC', 'stock_ohlcv')
 KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
 KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
 
-# stock symbols
-SYMBOLS_FILE = os.getenv('STOCK_SYMBOLS_FILE', '/app/data/stockList.csv')
-RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
+# intervals
 FETCH_INTERVAL = int(os.getenv('FETCH_INTERVAL', '86400'))  # Default: 24 hours
 
 def delivery_report(err, msg):
@@ -65,7 +63,7 @@ def create_kafka_producer():
 
 def save_to_csv(data, symbol, data_type='history'):
     """
-    Lưu dữ liệu vào file CSV để backup
+    Lưu dữ liệu vào file CSV để backup trong thư mục logs
     
     Tham số:
         data: Dữ liệu cần lưu (DataFrame hoặc dict)
@@ -73,13 +71,13 @@ def save_to_csv(data, symbol, data_type='history'):
         data_type (str): Loại dữ liệu (history, actions, info)
     """
     try:
-        # check xem thư mục đã tồn tại chưa
-        symbol_dir = os.path.join(RAW_DATA_PATH, symbol)
-        os.makedirs(symbol_dir, exist_ok=True)
+        # Sử dụng thư mục logs để lưu backup data
+        backup_dir = os.path.join('/app/logs', 'data_backup', symbol)
+        os.makedirs(backup_dir, exist_ok=True)
         
         # Tạo tên file với timestamp
         timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-        filename = os.path.join(symbol_dir, f"{symbol}_{data_type}_{timestamp}")
+        filename = os.path.join(backup_dir, f"{symbol}_{data_type}_{timestamp}")
         
         # Lưu dựa trên loại dữ liệu
         if isinstance(data, pd.DataFrame):
@@ -264,8 +262,8 @@ def main():
         try:
             logger.info(f"Starting data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Tải các mã cổ phiếu
-            symbols = load_stock_symbols(SYMBOLS_FILE)
+            # Tải các mã cổ phiếu từ Google Drive
+            symbols = load_stock_symbols()
             
             # Xử lý từng mã cổ phiếu
             for symbol in symbols:
