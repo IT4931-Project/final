@@ -6,7 +6,7 @@
 # - All networks (except default)
 # - All volumes
 # - All build cache
-# - Docker images older than 48 hours
+# - Docker images newer than 48 hours (created in the last 2 days)
 # - Docker images tagged as <none> (dangling images)
 
 echo "🧹 Starting Docker cleanup process..."
@@ -43,7 +43,8 @@ docker network prune --force 2>/dev/null || echo "  No custom networks to remove
 
 echo ""
 echo "💾 Removing all volumes..."
-docker volume prune --force 2>/dev/null || echo "  No volumes to remove or error during volume pruning."
+echo "  Executing: docker volume prune --force"
+docker volume prune --force
 
 echo ""
 echo "🧽 Removing all build cache..."
@@ -55,11 +56,13 @@ echo "📦 Removing specific Docker images..."
 echo "  Attempting to remove images newer than 48 hours (created in the last 2 days)..."
 # This command removes all images (dangling or not, used by other images or not, as long as not used by containers)
 # created since 48 hours ago (i.e., in the last 2 days). Since containers are already removed, this should be effective.
-docker image prune -a --force --filter "since=48h" 2>/dev/null || echo "  No images newer than 48 hours found, or an error occurred."
+echo "  Executing: docker image prune -a --force --filter \"since=48h\""
+docker image prune -a --force --filter "since=48h"
 
 echo "  Attempting to remove <none> (dangling) images..."
 # This command removes all dangling images.
-docker image prune --force --filter "dangling=true" 2>/dev/null || echo "  No dangling images found, or an error occurred during their removal."
+echo "  Executing: docker image prune --force --filter \"dangling=true\""
+docker image prune --force --filter "dangling=true"
 
 echo ""
 echo "📊 Current Docker status after cleanup:"
