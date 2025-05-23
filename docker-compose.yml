@@ -138,7 +138,8 @@ services:
     hostname: kafka-broker1
     container_name: finance_kafka_broker1
     depends_on:
-      - zookeeper1
+      zookeeper1:
+        condition: service_healthy
     ports:
       - '9092:9092'
     environment:
