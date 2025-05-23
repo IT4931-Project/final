@@ -56,31 +56,37 @@ echo "📦 Removing specific Docker images..."
 echo "  Attempting to remove images newer than 48 hours (created in the last 2 days)..."
 # Get POSIX timestamp for 48 hours ago. GNU date is assumed (common in WSL).
 CUTOFF_TIMESTAMP=$(date -d "48 hours ago" +%s)
+echo "  DEBUG: CUTOFF_TIMESTAMP = $CUTOFF_TIMESTAMP"
 
-# Create a temporary file to hold image IDs and their creation timestamps.
-TMP_IMAGE_LIST_FILE=$(mktemp)
-if [ -z "$TMP_IMAGE_LIST_FILE" ] || [ ! -f "$TMP_IMAGE_LIST_FILE" ]; then
-    echo "  Error: Failed to create a temporary file. Skipping removal of newer images."
+# Get all image IDs
+ALL_IMAGE_IDS=$(docker images -q)
+
+if [ -z "$ALL_IMAGE_IDS" ]; then
+    echo "  No images found."
 else
-    docker images --format "{{.ID}}\t{{.CreatedAt}}" > "$TMP_IMAGE_LIST_FILE"
-
     IMAGE_IDS_TO_DELETE=""
-    while IFS=$'\t' read -r img_id img_created_at; do
-      # Ensure img_id and img_created_at are not empty
-      if [ -n "$img_id" ] && [ -n "$img_created_at" ]; then
+    # Loop through each image ID
+    for img_id in $ALL_IMAGE_IDS; do
+      # Get creation timestamp in ISO 8601 format
+      iso_created_at=$(docker inspect --format='{{.Created}}' "$img_id" 2>/dev/null)
+
+      if [ -n "$iso_created_at" ]; then
+        echo "  DEBUG: Processing img_id = $img_id, iso_created_at = $iso_created_at"
         # Convert image creation time to POSIX timestamp.
-        # Suppress errors from date conversion in case of unexpected format.
-        img_ts=$(date -d "$img_created_at" +%s 2>/dev/null)
+        img_ts=$(date -d "$iso_created_at" +%s 2>/dev/null)
+        echo "  DEBUG: Converted img_ts = $img_ts"
 
         # If conversion was successful and image is newer than cutoff:
         if [ -n "$img_ts" ] && [ "$img_ts" -gt "$CUTOFF_TIMESTAMP" ]; then
+          echo "  DEBUG: Adding $img_id to delete list (img_ts $img_ts > CUTOFF_TIMESTAMP $CUTOFF_TIMESTAMP)."
           IMAGE_IDS_TO_DELETE="$IMAGE_IDS_TO_DELETE $img_id"
+        else
+          echo "  DEBUG: Not adding $img_id (img_ts $img_ts <= CUTOFF_TIMESTAMP $CUTOFF_TIMESTAMP or img_ts is empty)."
         fi
+      else
+        echo "  Warning: Could not inspect image ID $img_id to get creation date (iso_created_at is empty). Skipping."
       fi
-    done < "$TMP_IMAGE_LIST_FILE"
-
-    # Clean up the temporary file.
-    rm "$TMP_IMAGE_LIST_FILE"
+    done
 
     if [ -n "$IMAGE_IDS_TO_DELETE" ]; then
       echo "  The following image IDs (newer than 48 hours) will be attempted for removal:"
