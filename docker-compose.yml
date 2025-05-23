@@ -231,31 +231,6 @@ services:
       - spark-master
     restart: unless-stopped
 
-  # Spark Worker 3
-  spark-worker3:
-    build:
-      context: ./docker
-      dockerfile: spark.Dockerfile
-    container_name: finance_spark_worker3
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_CORES=2
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_WEBUI_PORT=8083
-      - SPARK_CONF_DIR=/spark/conf
-    ports:
-      - "8083:8081"
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./spark-conf:/spark/conf
-    networks:
-      - finance_network
-    depends_on:
-      - spark-master
-    restart: unless-stopped
-
   # Elasticsearch Cluster
   elasticsearch-master:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
@@ -429,7 +404,6 @@ services:
       - spark-master
       - spark-worker1
       - spark-worker2
-      - spark-worker3
       - namenode
       - datanode1
       - datanode2
@@ -459,7 +433,6 @@ services:
       - spark-master
       - spark-worker1
       - spark-worker2
-      - spark-worker3
       - namenode
       - datanode1
       - datanode2
