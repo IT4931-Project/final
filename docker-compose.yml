@@ -480,8 +480,6 @@ services:
       - ./configs:/app/configs
     env_file:
       - .env
-    environment:
-      - GOOGLE_DRIVE_FILE_ID=1OfeZVRlXU909V7QvzToLYqVJZdDbxnRx
     networks:
       - finance_network
     depends_on:
