@@ -43,8 +43,18 @@ docker network prune --force 2>/dev/null || echo "  No custom networks to remove
 
 echo ""
 echo "💾 Removing all volumes..."
-echo "  Executing: docker volume prune --force"
-docker volume prune --force
+ALL_VOLUMES=$(docker volume ls -q)
+if [ -n "$ALL_VOLUMES" ]; then
+  echo "  The following volumes will be attempted for removal:"
+  # Display volume names, one per line, indented
+  echo "$ALL_VOLUMES" | tr ' ' '\n' | sed 's/^/    /'
+  echo "  Executing: docker volume rm --force $ALL_VOLUMES"
+  # SC2086: We want word splitting for $ALL_VOLUMES
+  # shellcheck disable=SC2086
+  docker volume rm --force $ALL_VOLUMES
+else
+  echo "  No volumes found to remove."
+fi
 
 echo ""
 echo "🧽 Removing all build cache..."
