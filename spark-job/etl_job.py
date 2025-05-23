@@ -39,7 +39,7 @@ logger = logging.getLogger("etl_job")
 load_dotenv()
 
 # Configuration
-MONGO_HOST = os.getenv('MONGO_HOST', 'mongo-router')
+MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
 MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
