@@ -13,7 +13,6 @@ import logging
 import datetime
 import pandas as pd
 import pytz
-from dotenv import load_dotenv
 from confluent_kafka import Producer
 import csv
 
@@ -34,9 +33,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("crawler")
-
-# load env
-load_dotenv()
 
 # config kafka
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092')

@@ -13,10 +13,6 @@ import requests
 import tempfile
 import csv
 from typing import Optional, Dict, Any, List
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Thiết lập logging
 logger = logging.getLogger("fetch_utils")
