@@ -235,14 +235,13 @@ services:
   # Elasticsearch Cluster
   elasticsearch-master:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
-    container_name: finance_elasticsearch_master
+    container_name: finance_elasticsearch_master # This service will now be the single ES node
     environment:
-      - node.name=master
+      - node.name=es-single-node                 # Node name for the single instance
       - cluster.name=finance-es-cluster
-      - discovery.seed_hosts=elasticsearch-data1,elasticsearch-data2,elasticsearch-data3
-      - cluster.initial_master_nodes=master
+      - discovery.type=single-node             # Critical for single-node operation
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=true
+      - xpack.security.enabled=true              # Keep security enabled as Kibana uses it
       - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
       - bootstrap.memory_lock=true
     ulimits:
@@ -250,87 +249,12 @@ services:
         soft: -1
         hard: -1
     volumes:
-      - es_master_data:/usr/share/elasticsearch/data
+      - es_master_data:/usr/share/elasticsearch/data # This volume will store all data
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "9200:9200"                            # HTTP port
+      - "9300:9300"                            # Transport port
     networks:
       - finance_network
-    restart: unless-stopped
-
-  elasticsearch-data1:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
-    container_name: finance_elasticsearch_data1
-    environment:
-      - node.name=data1
-      - cluster.name=finance-es-cluster
-      - discovery.seed_hosts=elasticsearch-master,elasticsearch-data2,elasticsearch-data3
-      - cluster.initial_master_nodes=master
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
-      - bootstrap.memory_lock=true
-      - node.roles=["data", "ingest"]
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - es_data1_data:/usr/share/elasticsearch/data
-    networks:
-      - finance_network
-    depends_on:
-      - elasticsearch-master
-    restart: unless-stopped
-
-  elasticsearch-data2:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
-    container_name: finance_elasticsearch_data2
-    environment:
-      - node.name=data2
-      - cluster.name=finance-es-cluster
-      - discovery.seed_hosts=elasticsearch-master,elasticsearch-data1,elasticsearch-data3
-      - cluster.initial_master_nodes=master
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
-      - bootstrap.memory_lock=true
-      - node.roles=["data", "ingest"]
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - es_data2_data:/usr/share/elasticsearch/data
-    networks:
-      - finance_network
-    depends_on:
-      - elasticsearch-master
-    restart: unless-stopped
-
-  elasticsearch-data3:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
-    container_name: finance_elasticsearch_data3
-    environment:
-      - node.name=data3
-      - cluster.name=finance-es-cluster
-      - discovery.seed_hosts=elasticsearch-master,elasticsearch-data1,elasticsearch-data2
-      - cluster.initial_master_nodes=master
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
-      - bootstrap.memory_lock=true
-      - node.roles=["data", "ingest"]
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - es_data3_data:/usr/share/elasticsearch/data
-    networks:
-      - finance_network
-    depends_on:
-      - elasticsearch-master
     restart: unless-stopped
 
   # Kibana
@@ -498,7 +422,5 @@ volumes:
   hadoop_datanode3:
   
   # Elasticsearch volumes
-  es_master_data:
-  es_data1_data:
-  es_data2_data:
-  es_data3_data:
+  es_master_data: # Volume for the single Elasticsearch node
+  # es_data1_data, es_data2_data, and es_data3_data are no longer needed
