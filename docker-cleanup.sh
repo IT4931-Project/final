@@ -54,11 +54,50 @@ echo ""
 echo "📦 Removing specific Docker images..."
 
 echo "  Attempting to remove images newer than 48 hours (created in the last 2 days)..."
-# This command removes all images (dangling or not, used by other images or not, as long as not used by containers)
-# created since 48 hours ago (i.e., in the last 2 days). Since containers are already removed, this should be effective.
-echo "  Executing: docker image prune -a --force --filter \"since=48h\""
-docker image prune -a --force --filter "since=48h"
+# Get POSIX timestamp for 48 hours ago. GNU date is assumed (common in WSL).
+CUTOFF_TIMESTAMP=$(date -d "48 hours ago" +%s)
 
+# Create a temporary file to hold image IDs and their creation timestamps.
+TMP_IMAGE_LIST_FILE=$(mktemp)
+if [ -z "$TMP_IMAGE_LIST_FILE" ] || [ ! -f "$TMP_IMAGE_LIST_FILE" ]; then
+    echo "  Error: Failed to create a temporary file. Skipping removal of newer images."
+else
+    docker images --format "{{.ID}}\t{{.CreatedAt}}" > "$TMP_IMAGE_LIST_FILE"
+
+    IMAGE_IDS_TO_DELETE=""
+    while IFS=$'\t' read -r img_id img_created_at; do
+      # Ensure img_id and img_created_at are not empty
+      if [ -n "$img_id" ] && [ -n "$img_created_at" ]; then
+        # Convert image creation time to POSIX timestamp.
+        # Suppress errors from date conversion in case of unexpected format.
+        img_ts=$(date -d "$img_created_at" +%s 2>/dev/null)
+
+        # If conversion was successful and image is newer than cutoff:
+        if [ -n "$img_ts" ] && [ "$img_ts" -gt "$CUTOFF_TIMESTAMP" ]; then
+          IMAGE_IDS_TO_DELETE="$IMAGE_IDS_TO_DELETE $img_id"
+        fi
+      fi
+    done < "$TMP_IMAGE_LIST_FILE"
+
+    # Clean up the temporary file.
+    rm "$TMP_IMAGE_LIST_FILE"
+
+    if [ -n "$IMAGE_IDS_TO_DELETE" ]; then
+      echo "  The following image IDs (newer than 48 hours) will be attempted for removal:"
+      # Display IDs, one per line, indented for readability.
+      # Using echo and tr to list IDs one per line for clarity before passing to xargs or rmi
+      echo "$IMAGE_IDS_TO_DELETE" | tr ' ' '\n' | sed 's/^/    /'
+      echo "  Executing: docker rmi --force $IMAGE_IDS_TO_DELETE"
+      # Remove the identified images.
+      # SC2086: We want word splitting for $IMAGE_IDS_TO_DELETE as it's a space-separated list of IDs.
+      # shellcheck disable=SC2086
+      docker rmi --force $IMAGE_IDS_TO_DELETE
+    else
+      echo "  No images found that are newer than 48 hours."
+    fi
+fi
+
+echo ""
 echo "  Attempting to remove <none> (dangling) images..."
 # This command removes all dangling images.
 echo "  Executing: docker image prune --force --filter \"dangling=true\""
