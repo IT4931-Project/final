@@ -17,4 +17,4 @@ RUN mkdir -p /app/data/raw /app/logs
 ENV PYTHONUNBUFFERED=1
 
 # Run the crawler on container start
-CMD sh -c "printenv && python crawler.py"
+CMD ["python", "crawler.py"]
