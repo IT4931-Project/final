@@ -13,6 +13,11 @@ import requests
 import tempfile
 import csv
 from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv # Import load_dotenv
+
+# Load environment variables explicitly at the start of this module
+# Assumes .env file is copied to /app/.env in the Docker image for the crawler service
+load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Thiết lập logging
 logger = logging.getLogger("fetch_utils")
