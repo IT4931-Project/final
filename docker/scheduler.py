@@ -3,8 +3,6 @@
 script de chay cac job tren docker container
 1. Crawler job - 10 minutes
 2. ETL job - 12 hours
-3. Training job - 2 days
-4. Inference job - daily
 """
 
 import os
@@ -38,7 +36,7 @@ def run_container(service_name):
     Run a specific container using Docker API
     
     Args:
-        service_name (str): Name of the service to run (crawler, etl, trainer, inference)
+        service_name (str): Name of the service to run (crawler, etl)
     """
     try:
         logger.info(f"Starting {service_name} job at {datetime.datetime.now()}")
@@ -104,20 +102,10 @@ def run_etl_job():
     """Run the ETL job to process raw data"""
     return run_container("etl")
 
-def run_training_job():
-    """Run the model training job"""
-    return run_container("trainer")
-
-def run_inference_job():
-    """Run the inference job to make predictions"""
-    return run_container("inference")
-
 def setup_schedule():
     """Configure the schedule for all jobs"""
     crawler_schedule = os.getenv("CRAWLER_SCHEDULE", "*/10 * * * *")
     etl_schedule = os.getenv("ETL_SCHEDULE", "0 */12 * * *")
-    training_schedule = os.getenv("TRAINING_SCHEDULE", "0 0 */2 * *")
-    inference_schedule = os.getenv("INFERENCE_SCHEDULE", "0 0 * * *")
     
     # Convert cron expressions to schedule format
     # For simplicity, we're using direct schedule methods rather than parsing cron
@@ -129,14 +117,6 @@ def setup_schedule():
     # ETL: every 12 hours
     schedule.every(12).hours.do(run_etl_job)
     logger.info("Scheduled ETL job: every 12 hours")
-    
-    # Training: every 2 days
-    schedule.every(2).days.do(run_training_job)
-    logger.info("Scheduled training job: every 2 days")
-    
-    # Inference: daily at midnight
-    schedule.every().day.at("00:00").do(run_inference_job)
-    logger.info("Scheduled inference job: daily at midnight")
 
 def main():
     """Main function to set up and run the scheduler"""
