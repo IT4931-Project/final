@@ -56,6 +56,11 @@ SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
 # Default NUM_PARTITIONS to a reasonable value if not set, e.g., 4
 NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '4'))
 
+# Elasticsearch Configuration
+ES_NODES = os.getenv('ES_NODES', 'elasticsearch-master') # Service name from docker-compose
+ES_PORT = os.getenv('ES_PORT', '9200')
+ES_INDEX_PREFIX = os.getenv('ES_INDEX_PREFIX', 'processed_stock_data') # Prefix for ES indices
+
 # Stock symbols to process (this will be overridden by dynamic discovery)
 # SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')
 
@@ -123,9 +128,15 @@ def create_spark_session():
             .master(SPARK_MASTER) \
             .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}") \
             .config("spark.mongodb.output.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}") \
-            .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
+            .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1,org.elasticsearch:elasticsearch-spark-30_2.12:8.3.3") \
             .config("spark.sql.shuffle.partitions", NUM_PARTITIONS) \
             .config("spark.default.parallelism", NUM_PARTITIONS) \
+            .config("spark.es.nodes", ES_NODES) \
+            .config("spark.es.port", ES_PORT) \
+            .config("spark.es.nodes.wan.only", "true") # Important for Docker environments if ES is on a different network segment or for discovery
+            .config("spark.es.resource", f"{ES_INDEX_PREFIX}_{{symbol}}/_doc") # Dynamic index per symbol, _doc for ES 7+ type
+            .config("spark.es.mapping.id", "row_id") # Use 'row_id' as the document ID in Elasticsearch
+            .config("spark.es.write.operation", "upsert") # Use upsert to update existing docs or insert new ones
             .config("spark.executor.instances", "1") \
             .config("spark.executor.cores", "2") \
             .config("spark.executor.memory", "1g") \
@@ -466,7 +477,39 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
         
         df_to_write.coalesce(1).write.mode("overwrite").parquet(local_backup_dir_path)
         logger.info(f"Successfully created local Parquet backup at {local_backup_dir_path}")
-        
+
+        # Write to Elasticsearch
+        try:
+            logger.info(f"Writing processed data for {symbol} to Elasticsearch index: {ES_INDEX_PREFIX}_{symbol}")
+            # The 'es.resource' in SparkSession is already configured with the symbol placeholder.
+            # Spark will replace {symbol} with the actual symbol value from the DataFrame column.
+            # However, the connector might not automatically pick up the 'symbol' column for dynamic index naming
+            # if it's not explicitly part of the es.resource string during the write operation itself.
+            # A common practice is to set the resource dynamically per write if needed,
+            # or ensure the global config is sufficient.
+            # For simplicity, we rely on the global config and assume 'symbol' column exists.
+            
+            # Ensure the DataFrame has the 'symbol' column for dynamic index name resolution by the connector
+            # if it's not already present (though it should be from clean_and_prepare_data)
+            if "symbol" not in df_to_write.columns:
+                df_with_symbol_for_es = df_to_write.withColumn("symbol", lit(symbol))
+            else:
+                df_with_symbol_for_es = df_to_write
+
+            df_with_symbol_for_es.write \
+                .format("org.elasticsearch.spark.sql") \
+                .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol}/_doc") \
+                .mode("overwrite") \
+                .save()
+
+            logger.info(f"Successfully wrote {df_with_symbol_for_es.count()} records to Elasticsearch index {ES_INDEX_PREFIX}_{symbol}")
+
+        except Exception as es_ex:
+            logger.error(f"Error writing data to Elasticsearch for {symbol}: {str(es_ex)}")
+            # Optionally, decide if this error should make the overall function fail.
+            # For now, we log the error and let the function return based on Mongo/Parquet success.
+            # To make ES write failure critical, you could re-raise or return False here.
+
         return True
         
     except Exception as e:
