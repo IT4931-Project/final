@@ -262,11 +262,16 @@ def calculate_technical_indicators(df):
     try:
         logger.info("Calculating technical indicators")
         
-        # Define windows for different lookback periods
-        window_5d = Window.orderBy("date").rowsBetween(-4, 0)
-        window_20d = Window.orderBy("date").rowsBetween(-19, 0)
-        window_50d = Window.orderBy("date").rowsBetween(-49, 0)
-        window_200d = Window.orderBy("date").rowsBetween(-199, 0)
+        # Define base window partitioned by symbol and ordered by date
+        # This ensures calculations are per symbol if multiple symbols were ever in the DataFrame
+        # and silences the "No Partition Defined" warning.
+        base_window = Window.partitionBy("symbol").orderBy("date")
+
+        # Define windows for different lookback periods based on the base window
+        window_5d = base_window.rowsBetween(-4, 0)
+        window_20d = base_window.rowsBetween(-19, 0)
+        window_50d = base_window.rowsBetween(-49, 0)
+        window_200d = base_window.rowsBetween(-199, 0)
         
         # 1. Simple Moving Averages (SMA)
         df = df.withColumn("sma_5", avg("close").over(window_5d))
@@ -275,13 +280,13 @@ def calculate_technical_indicators(df):
         df = df.withColumn("sma_200", avg("close").over(window_200d))
         
         # 2. Moving Average Convergence/Divergence (MACD) - simplified version
-        df = df.withColumn("ema_12", 
-                        avg("close").over(Window.orderBy("date").rowsBetween(-11, 0)))
-        df = df.withColumn("ema_26", 
-                        avg("close").over(Window.orderBy("date").rowsBetween(-25, 0)))
+        df = df.withColumn("ema_12",
+                        avg("close").over(base_window.rowsBetween(-11, 0)))
+        df = df.withColumn("ema_26",
+                        avg("close").over(base_window.rowsBetween(-25, 0)))
         df = df.withColumn("macd", col("ema_12") - col("ema_26"))
-        df = df.withColumn("signal_line", 
-                        avg("macd").over(Window.orderBy("date").rowsBetween(-8, 0)))
+        df = df.withColumn("signal_line",
+                        avg("macd").over(base_window.rowsBetween(-8, 0)))
         df = df.withColumn("macd_histogram", col("macd") - col("signal_line"))
         
         # 3. Bollinger Bands (BB)
@@ -291,15 +296,15 @@ def calculate_technical_indicators(df):
         df = df.withColumn("bb_lower", col("bb_middle") - (col("bb_stddev") * lit(2)))
         
         # 4. Relative Strength Index (RSI) - simplified calculation
-        window_prev = Window.orderBy("date").rowsBetween(-1, -1)
-        df = df.withColumn("prev_close", lag("close", 1).over(Window.orderBy("date")))
+        # lag function needs a window just ordered by date within the partition
+        df = df.withColumn("prev_close", lag("close", 1).over(base_window)) # lag uses the base_window
         df = df.withColumn("price_change", col("close") - col("prev_close"))
         df = df.withColumn("gain", when(col("price_change") > 0, col("price_change")).otherwise(0))
         df = df.withColumn("loss", when(col("price_change") < 0, -col("price_change")).otherwise(0))
         
-        window_14d = Window.orderBy("date").rowsBetween(-13, 0)
-        df = df.withColumn("avg_gain", avg("gain").over(window_14d))
-        df = df.withColumn("avg_loss", avg("loss").over(window_14d))
+        window_14d_rsi = base_window.rowsBetween(-13, 0) # RSI specific window
+        df = df.withColumn("avg_gain", avg("gain").over(window_14d_rsi))
+        df = df.withColumn("avg_loss", avg("loss").over(window_14d_rsi))
         df = df.withColumn("rs", when(col("avg_loss") != 0, col("avg_gain") / col("avg_loss")).otherwise(lit(100)))
         df = df.withColumn("rsi", lit(100) - (lit(100) / (lit(1) + col("rs"))))
         
@@ -310,24 +315,25 @@ def calculate_technical_indicators(df):
                         .otherwise(0))
         
         # We need to calculate running sum, which is tricky in Spark
-        # Using a window function with growing window
-        growing_window = Window.orderBy("date").rowsBetween(Window.unboundedPreceding, 0)
-        df = df.withColumn("obv", spark_sum("volume_sign").over(growing_window))
+        # Using a window function with growing window, partitioned by symbol
+        growing_window_partitioned = base_window.rowsBetween(Window.unboundedPreceding, 0)
+        df = df.withColumn("obv", spark_sum("volume_sign").over(growing_window_partitioned))
         
         # 6. Price momentum indicators (percent changes)
+        # prev_close is already calculated using base_window
         df = df.withColumn("day_change_pct", (col("close") - col("prev_close")) / col("prev_close") * 100)
         
         # Week change percent - close vs 5 days ago close
-        df = df.withColumn("prev_5d_close", lag("close", 5).over(Window.orderBy("date")))
-        df = df.withColumn("week_change_pct", 
-                        when(col("prev_5d_close").isNotNull(), 
+        df = df.withColumn("prev_5d_close", lag("close", 5).over(base_window))
+        df = df.withColumn("week_change_pct",
+                        when(col("prev_5d_close").isNotNull(),
                             (col("close") - col("prev_5d_close")) / col("prev_5d_close") * 100)
                         .otherwise(lit(0)))
         
         # Month change percent - close vs 20 days ago close
-        df = df.withColumn("prev_20d_close", lag("close", 20).over(Window.orderBy("date")))
-        df = df.withColumn("month_change_pct", 
-                        when(col("prev_20d_close").isNotNull(), 
+        df = df.withColumn("prev_20d_close", lag("close", 20).over(base_window))
+        df = df.withColumn("month_change_pct",
+                        when(col("prev_20d_close").isNotNull(),
                             (col("close") - col("prev_20d_close")) / col("prev_20d_close") * 100)
                         .otherwise(lit(0)))
         
