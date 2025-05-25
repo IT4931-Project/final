@@ -43,6 +43,7 @@ MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
 MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
+MONGO_AUTH_SOURCE = 'admin' # Hardcoding auth source to 'admin'
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
 NUM_CORES_PER_WORKER = int(os.getenv('NUM_CORES_PER_WORKER', '2')) # From trainer.py
 NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', NUM_CORES_PER_WORKER)) # Adjusted for single worker
@@ -64,7 +65,7 @@ def create_spark_session():
             .appName("Distributed Stock Price Prediction") \
             .master(SPARK_MASTER) \
             .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
-            .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}") \
+            .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}") \
             .config("spark.sql.parquet.int96AsTimestamp", "true") \
             .config("spark.sql.legacy.parquet.nanosAsLong", "true") \
             .config("spark.sql.shuffle.partitions", NUM_PARTITIONS) \

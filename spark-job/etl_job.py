@@ -44,6 +44,7 @@ MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
 MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
+MONGO_AUTH_SOURCE = 'admin' # Hardcoding auth source to 'admin'
 RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
 PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup')
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
@@ -64,8 +65,8 @@ def create_spark_session():
         spark = SparkSession.builder \
             .appName("Financial Data ETL") \
             .master(SPARK_MASTER) \
-            .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}") \
-            .config("spark.mongodb.output.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}") \
+            .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}") \
+            .config("spark.mongodb.output.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}") \
             .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
             .config("spark.sql.shuffle.partitions", NUM_PARTITIONS) \
             .config("spark.default.parallelism", NUM_PARTITIONS) \

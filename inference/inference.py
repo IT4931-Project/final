@@ -47,6 +47,7 @@ MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
 MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
+MONGO_AUTH_SOURCE = 'admin' # Hardcoding auth source to 'admin'
 
 # Elasticsearch Cluster Configuration
 ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'elasticsearch-master')
@@ -170,6 +171,7 @@ def connect_to_mongodb():
             port=MONGO_PORT,
             username=MONGO_USERNAME,
             password=MONGO_PASSWORD,
+            authSource=MONGO_AUTH_SOURCE, # Add authSource
             serverSelectionTimeoutMS=5000,  # 5 second timeout
             readPreference='primary'  # Use primary for single node
         )
