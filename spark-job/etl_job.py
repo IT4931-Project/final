@@ -45,9 +45,7 @@ MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
 MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
 RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
-HDFS_NAMENODE = os.getenv('HDFS_NAMENODE', 'namenode')
-HDFS_NAMENODE_PORT = os.getenv('HDFS_NAMENODE_PORT', '8020')
-HDFS_PROCESSED_PATH = os.getenv('HDFS_PROCESSED_PATH', '/user/finance/processed')
+PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup')
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
 NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '12'))  # Default to 3 workers * 4 cores
 
@@ -68,18 +66,14 @@ def create_spark_session():
             .master(SPARK_MASTER) \
             .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}") \
             .config("spark.mongodb.output.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}") \
-            .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1,org.apache.hadoop:hadoop-aws:3.2.0") \
-            .config("spark.hadoop.fs.defaultFS", f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}") \
+            .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
             .config("spark.sql.shuffle.partitions", NUM_PARTITIONS) \
             .config("spark.default.parallelism", NUM_PARTITIONS) \
-            .config("spark.executor.instances", "3") \
+            .config("spark.executor.instances", "1") \
             .config("spark.executor.cores", "2") \
             .config("spark.executor.memory", "1g") \
             .config("spark.driver.memory", "1g") \
             .config("spark.driver.maxResultSize", "1g") \
-            .config("spark.hadoop.dfs.replication", "3") \
-            .config("spark.hadoop.dfs.client.use.datanode.hostname", "true") \
-            .config("spark.hadoop.dfs.datanode.use.datanode.hostname", "true") \
             .getOrCreate()
         
         # Set log level
@@ -111,9 +105,7 @@ def load_data_from_mongodb(spark, symbol):
             .format("mongo") \
             .option("database", MONGO_DATABASE) \
             .option("collection", f"stock_{symbol}") \
-            .option("readPreference", "secondaryPreferred") \
-            .option("partitioner", "MongoShardedPartitioner") \
-            .option("partitionerOptions.shardkey", '{"ticker": 1, "date": 1}') \
+            .option("readPreference", "primary") \
             .load()
         
         # Repartition to distribute the data processing across the cluster
@@ -344,9 +336,9 @@ def standardize_features(df):
         logger.error(f"Error standardizing features: {str(e)}")
         return df  # Return original DataFrame without standardization
 
-def write_to_hdfs(df, symbol):
+def write_processed_data_to_mongo_and_local_backup(df, symbol):
     """
-    Write processed data to HDFS as Parquet files
+    Write processed data to MongoDB and create a local Parquet backup.
     
     Args:
         df (pyspark.sql.DataFrame): Processed data
@@ -360,49 +352,37 @@ def write_to_hdfs(df, symbol):
         return False
     
     try:
-        # Generate timestamp
-        timestamp = datetime.datetime.now().strftime('%Y%m%d')
+        processed_collection_name = f"processed_{symbol}"
+
+        logger.info(f"Writing processed data for {symbol} to MongoDB collection: {processed_collection_name}")
         
-        # HDFS path
-        hdfs_output_path = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_PROCESSED_PATH}/{symbol}/processed_{timestamp}.parquet"
-        
-        # Write DataFrame as Parquet
-        logger.info(f"Writing processed data for {symbol} to HDFS: {hdfs_output_path}")
-        
-        # Drop unnecessary columns to save space
-        columns_to_drop = ["prev_close", "ema_12", "ema_26", "price_change", "gain", "loss", 
-                          "avg_gain", "avg_loss", "rs", "volume_sign"]
-        
-        for col_name in columns_to_drop:
-            if col_name in df.columns:
-                df = df.drop(col_name)
-        
-        # Repartition for optimal storage in HDFS
-        # Parquet files should be between 128MB to 1GB for optimal performance in HDFS
-        # Let's aim for ~256MB per partition
-        optimized_partitions = max(1, min(NUM_PARTITIONS, int(df.count() / 1000000) + 1))
-        df = df.repartition(optimized_partitions)
-        
-        # Write the data to HDFS with compression
-        df.write \
+        df_to_write = df
+        # If 'scaled_features' (vector) exists and is preferred over raw 'features' (vector), drop 'features'.
+        if "features" in df_to_write.columns and "scaled_features" in df_to_write.columns:
+             df_to_write = df_to_write.drop("features")
+
+        # Write the data to MongoDB
+        df_to_write.write \
+          .format("mongo") \
           .mode("overwrite") \
-          .option("compression", "snappy") \
-          .partitionBy("symbol") \
-          .parquet(hdfs_output_path)
+          .option("database", MONGO_DATABASE) \
+          .option("collection", processed_collection_name) \
+          .save()
         
-        # Create a backup in local filesystem
-        local_output_dir = os.path.join(RAW_DATA_PATH, symbol)
-        local_output_path = os.path.join(local_output_dir, f"processed_{timestamp}_backup.parquet")
-        os.makedirs(local_output_dir, exist_ok=True)
+        logger.info(f"Successfully wrote {df_to_write.count()} records to MongoDB collection {processed_collection_name}")
+
+        # Create a backup in local filesystem (Parquet)
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        local_backup_dir_path = os.path.join(PROCESSED_DATA_LOCAL_BACKUP_PATH, symbol, f"backup_{timestamp}")
+        os.makedirs(local_backup_dir_path, exist_ok=True)
         
-        # Write a single partition backup locally
-        df.coalesce(1).write.mode("overwrite").parquet(local_output_path)
+        df_to_write.coalesce(1).write.mode("overwrite").parquet(local_backup_dir_path)
+        logger.info(f"Successfully created local Parquet backup at {local_backup_dir_path}")
         
-        logger.info(f"Successfully wrote {df.count()} records to HDFS {hdfs_output_path} with {optimized_partitions} partitions")
         return True
         
     except Exception as e:
-        logger.error(f"Error writing data to Parquet: {str(e)}")
+        logger.error(f"Error writing processed data for {symbol}: {str(e)}")
         return False
 
 def process_symbol(spark, symbol):
@@ -458,8 +438,8 @@ def process_symbol(spark, symbol):
         # Release memory from tech_df
         tech_df.unpersist()
         
-        # Write to HDFS
-        success = write_to_hdfs(std_df, symbol)
+        # Write to MongoDB and local backup
+        success = write_processed_data_to_mongo_and_local_backup(std_df, symbol)
         
         return success
         
@@ -473,25 +453,6 @@ def main():
     
     # Create Spark session
     spark = create_spark_session()
-    
-    # Check HDFS connection
-    try:
-        # Get the Hadoop filesystem
-        hadoop_conf = spark._jsc.hadoopConfiguration()
-        hadoop_fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-        
-        # Create base directory if it doesn't exist
-        hdfs_base_path = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_PROCESSED_PATH}"
-        hdfs_path = spark._jvm.org.apache.hadoop.fs.Path(hdfs_base_path)
-        
-        if not hadoop_fs.exists(hdfs_path):
-            hadoop_fs.mkdirs(hdfs_path)
-            logger.info(f"Created HDFS directory: {hdfs_base_path}")
-        else:
-            logger.info(f"HDFS directory exists: {hdfs_base_path}")
-    except Exception as e:
-        logger.error(f"Error checking/creating HDFS directory: {str(e)}")
-        logger.warning("Continuing with processing, but HDFS writes may fail")
     
     # Process symbols in parallel
     # Process symbols sequentially on the driver

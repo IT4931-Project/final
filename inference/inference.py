@@ -37,17 +37,11 @@ logger = logging.getLogger("inference")
 load_dotenv()
 
 # Configuration
-PROCESSED_DATA_PATH = os.getenv('PROCESSED_DATA_PATH', '/app/data/processed')
-MODEL_PATH = os.getenv('MODEL_PATH', '/app/data/models')
+PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup') # For fallback
+MODEL_PATH = os.getenv('MODEL_PATH', '/app/data/models') # Local path for models
+USE_HDFS = False # HDFS is removed
 
-# HDFS Configuration
-HDFS_NAMENODE = os.getenv('HDFS_NAMENODE', 'namenode')
-HDFS_NAMENODE_PORT = os.getenv('HDFS_NAMENODE_PORT', '8020')
-HDFS_PROCESSED_PATH = os.getenv('HDFS_PROCESSED_PATH', '/user/finance/processed')
-HDFS_MODEL_PATH = os.getenv('HDFS_MODEL_PATH', '/user/finance/models')
-USE_HDFS = os.getenv('USE_HDFS', 'true').lower() == 'true'
-
-# MongoDB Sharded Cluster Configuration
+# MongoDB Configuration
 MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
 MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
@@ -63,7 +57,7 @@ USE_ELASTICSEARCH = os.getenv('USE_ELASTICSEARCH', 'true').lower() == 'true'
 
 # Spark Configuration for distributed processing
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '12'))  # Default to 3 workers * 4 cores
+NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '2'))  # Adjusted for single worker
 
 # Inference parameters
 SEQUENCE_LENGTH = 30  # Number of days to look back
@@ -85,17 +79,14 @@ def create_spark_session():
         
         # Create Spark session
         spark = SparkSession.builder \
-            .appName("Distributed Model Inference") \
+            .appName("Model Inference") \
             .master(SPARK_MASTER) \
-            .config("spark.hadoop.fs.defaultFS", f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}") \
             .config("spark.sql.shuffle.partitions", NUM_PARTITIONS) \
             .config("spark.default.parallelism", NUM_PARTITIONS) \
-            .config("spark.driver.memory", "2g") \
-            .config("spark.executor.memory", "2g") \
+            .config("spark.driver.memory", "1g") \
+            .config("spark.executor.memory", "1g") \
+            .config("spark.executor.instances", "1") \
             .config("spark.executor.cores", "2") \
-            .config("spark.hadoop.dfs.replication", "3") \
-            .config("spark.hadoop.dfs.client.use.datanode.hostname", "true") \
-            .config("spark.hadoop.dfs.datanode.use.datanode.hostname", "true") \
             .getOrCreate()
         
         logger.info("Created Spark session successfully for distributed inference")
@@ -133,8 +124,8 @@ def connect_to_elasticsearch():
             if not es.indices.exists(index='stock_predictions'):
                 es.indices.create(index='stock_predictions', body={
                     'settings': {
-                        'number_of_shards': 3,
-                        'number_of_replicas': 2,
+                        'number_of_shards': 1,  # Simplified for single ES node
+                        'number_of_replicas': 0, # Simplified for single ES node
                         'refresh_interval': '1s'
                     },
                     'mappings': {
@@ -168,7 +159,7 @@ def connect_to_elasticsearch():
 
 def connect_to_mongodb():
     """
-    Connect to MongoDB sharded cluster
+    Connect to MongoDB
     
     Returns:
         pymongo.database.Database: MongoDB database connection
@@ -180,23 +171,20 @@ def connect_to_mongodb():
             username=MONGO_USERNAME,
             password=MONGO_PASSWORD,
             serverSelectionTimeoutMS=5000,  # 5 second timeout
-            readPreference='secondaryPreferred'  # Use secondary nodes for reads by default for better performance
+            readPreference='primary'  # Use primary for single node
         )
         
         # Test the connection
         client.server_info()
-        logger.info(f"Connected to MongoDB sharded cluster at {MONGO_HOST}:{MONGO_PORT}")
+        logger.info(f"Connected to MongoDB at {MONGO_HOST}:{MONGO_PORT}")
         
         # Get database
         db = client[MONGO_DATABASE]
         
-        # Create predictions collection if it doesn't exist
+        # Create predictions collection if it doesn't exist (no sharding needed for single node)
         if 'predictions' not in db.list_collection_names():
-            # Create a sharded collection with a good shard key for predictions
-            db.command('create', 'predictions')
-            db.command('shardCollection', f'{MONGO_DATABASE}.predictions', 
-                       key={'symbol': 1, 'prediction_date': 1})
-            logger.info("Created sharded 'predictions' collection in MongoDB")
+            db.create_collection('predictions')
+            logger.info("Created 'predictions' collection in MongoDB")
         
         return db
     
@@ -207,31 +195,23 @@ def connect_to_mongodb():
         logger.error(f"Error connecting to MongoDB: {str(e)}")
         return None
 
-
-def load_latest_model_files(symbol, spark=None):
+def load_latest_model_files(symbol, spark=None): # spark parameter is no longer used for HDFS
     """
-    Load the latest model and associated files for a symbol from HDFS or local storage
+    Load the latest model and associated files for a symbol from local storage.
+    HDFS loading has been removed.
     
     Args:
         symbol (str): Stock symbol
-        spark (SparkSession, optional): Spark session for HDFS access
+        spark (SparkSession, optional): No longer used. Kept for signature compatibility if needed elsewhere.
     
     Returns:
         tuple: (model, scaler_data, metadata) or (None, None, None) if not found
     """
-    if USE_HDFS and spark is not None:
-        # Try to load from HDFS first
-        try:
-            return load_model_from_hdfs(symbol, spark)
-        except Exception as e:
-            logger.error(f"Error loading model from HDFS: {str(e)}")
-            logger.warning(f"Falling back to local model for {symbol}")
-            
-    # Fall back to local filesystem if HDFS fails or is disabled
+    logger.info(f"Attempting to load model files for {symbol} from local storage.")
     try:
         model_dir = os.path.join(MODEL_PATH, symbol)
         if not os.path.exists(model_dir):
-            logger.error(f"No model directory found for {symbol}")
+            logger.error(f"No model directory found for {symbol} at {model_dir}")
             return None, None, None
         
         # Get the latest model version from latest.txt
@@ -240,308 +220,174 @@ def load_latest_model_files(symbol, spark=None):
             with open(latest_path, 'r') as f:
                 timestamp = f.read().strip()
         else:
-            # If latest.txt doesn't exist, find the latest model file
+            # If latest.txt doesn't exist, find the latest model file by sorting
             model_files = glob.glob(os.path.join(model_dir, "model_*.h5"))
             if not model_files:
-                logger.error(f"No model files found for {symbol}")
+                logger.error(f"No model files (model_*.h5) found for {symbol} in {model_dir}")
                 return None, None, None
             
-            # Extract timestamps from filenames and get the latest
             timestamps = [os.path.basename(f).replace("model_", "").replace(".h5", "") for f in model_files]
-            timestamp = sorted(timestamps)[-1]
+            timestamp = sorted(timestamps, reverse=True)[0] # Get the most recent
         
         logger.info(f"Using local model version {timestamp} for {symbol}")
         
-        # Load the model
-        model_path = os.path.join(model_dir, f"model_{timestamp}.h5")
-        if not os.path.exists(model_path):
-            logger.error(f"Model file not found: {model_path}")
-            return None, None, None
-        
-        model = load_model(model_path)
-        logger.info(f"Loaded model from local path: {model_path}")
-        
-        # Load the scaler
-        scaler_path = os.path.join(model_dir, f"scaler_{timestamp}.npz")
-        if not os.path.exists(scaler_path):
-            logger.error(f"Scaler file not found: {scaler_path}")
-            return None, None, None
-        
-        scaler_data = np.load(scaler_path)
-        logger.info(f"Loaded scaler from local path: {scaler_path}")
-        
-        # Load metadata
-        metadata_path = os.path.join(model_dir, f"metadata_{timestamp}.json")
-        if not os.path.exists(metadata_path):
-            logger.warning(f"Metadata file not found: {metadata_path}")
-            metadata = {}
-        else:
-            with open(metadata_path, 'r') as f:
-                metadata = json.load(f)
-            logger.info(f"Loaded metadata from local path: {metadata_path}")
-        
-        return model, scaler_data, metadata
-    
-    except Exception as e:
-        logger.error(f"Error loading model files for {symbol}: {str(e)}")
-        return None, None, None
+        model_file_path = os.path.join(model_dir, f"model_{timestamp}.h5")
+        scaler_file_path = os.path.join(model_dir, f"scaler_{timestamp}.npz")
+        metadata_file_path = os.path.join(model_dir, f"metadata_{timestamp}.json")
 
-def load_model_from_hdfs(symbol, spark):
-    """
-    Load model files from HDFS
-    
-    Args:
-        symbol (str): Stock symbol
-        spark (SparkSession): Spark session for HDFS access
-    
-    Returns:
-        tuple: (model, scaler_data, metadata) or (None, None, None) if not found
-    """
-    try:
-        # Get Hadoop filesystem
-        hadoop_conf = spark._jsc.hadoopConfiguration()
-        fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-        
-        # HDFS path for this symbol's models
-        hdfs_symbol_dir = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_MODEL_PATH}/{symbol}"
-        hdfs_dir_path = spark._jvm.org.apache.hadoop.fs.Path(hdfs_symbol_dir)
-        
-        if not fs.exists(hdfs_dir_path):
-            logger.error(f"HDFS directory not found: {hdfs_symbol_dir}")
+        if not os.path.exists(model_file_path):
+            logger.error(f"Model file not found: {model_file_path}")
             return None, None, None
+        model = load_model(model_file_path)
+        logger.info(f"Loaded model from local path: {model_file_path}")
         
-        # Get the latest model version from latest.txt in HDFS
-        hdfs_latest_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/latest.txt")
-        if fs.exists(hdfs_latest_path):
-            # Create a BufferedReader to read the file content
-            input_stream = fs.open(hdfs_latest_path)
-            reader = spark._jvm.java.io.BufferedReader(spark._jvm.java.io.InputStreamReader(input_stream))
-            timestamp = reader.readLine().strip()
-            input_stream.close()
-        else:
-            # If latest.txt doesn't exist, find the latest model file in HDFS
-            file_statuses = fs.listStatus(hdfs_dir_path)
-            if file_statuses is None or len(file_statuses) == 0:
-                logger.error(f"No files found in HDFS path: {hdfs_symbol_dir}")
-                return None, None, None
-                
-            # Look for model files and sort by timestamp in the name
-            model_files = []
-            for status in file_statuses:
-                path = status.getPath().toString()
-                if "model_" in path and path.endswith(".h5"):
-                    model_files.append(path)
-                    
-            if not model_files:
-                logger.error(f"No model files found in HDFS for {symbol}")
-                return None, None, None
-                
-            # Sort model files by timestamp in filename (descending)
-            model_files.sort(reverse=True)
-            
-            # Extract timestamp from the latest model file path
-            timestamp = model_files[0].split("model_")[1].split(".h5")[0]
-        
-        logger.info(f"Using HDFS model version {timestamp} for {symbol}")
-        
-        # Temporary local paths for model files
-        tmp_dir = "/tmp/model_files"
-        os.makedirs(tmp_dir, exist_ok=True)
-        local_model_path = os.path.join(tmp_dir, f"model_{timestamp}.h5")
-        local_scaler_path = os.path.join(tmp_dir, f"scaler_{timestamp}.npz")
-        local_metadata_path = os.path.join(tmp_dir, f"metadata_{timestamp}.json")
-        
-        # Download model file from HDFS
-        hdfs_model_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/model_{timestamp}.h5")
-        if not fs.exists(hdfs_model_path):
-            logger.error(f"Model file not found in HDFS: {hdfs_model_path}")
+        if not os.path.exists(scaler_file_path):
+            logger.error(f"Scaler file not found: {scaler_file_path}")
+            # Depending on strictness, you might return or allow continuation without scaler
             return None, None, None
-            
-        output_stream = fs.open(hdfs_model_path)
-        java_input_stream = output_stream.getWrappedInputStream()
+        scaler_data = np.load(scaler_file_path)
+        logger.info(f"Loaded scaler from local path: {scaler_file_path}")
         
-        # Convert Java InputStream to Python bytes
-        java_bytes = spark._jvm.org.apache.commons.io.IOUtils.toByteArray(java_input_stream)
-        py_bytes = bytes(java_bytes)
-        
-        # Write to local file
-        with open(local_model_path, 'wb') as f:
-            f.write(py_bytes)
-            
-        output_stream.close()
-        logger.info(f"Downloaded model from HDFS to local path: {local_model_path}")
-        
-        # Download scaler file from HDFS
-        hdfs_scaler_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/scaler_{timestamp}.npz")
-        if not fs.exists(hdfs_scaler_path):
-            logger.error(f"Scaler file not found in HDFS: {hdfs_scaler_path}")
-            return None, None, None
-            
-        output_stream = fs.open(hdfs_scaler_path)
-        java_input_stream = output_stream.getWrappedInputStream()
-        java_bytes = spark._jvm.org.apache.commons.io.IOUtils.toByteArray(java_input_stream)
-        py_bytes = bytes(java_bytes)
-        
-        with open(local_scaler_path, 'wb') as f:
-            f.write(py_bytes)
-            
-        output_stream.close()
-        logger.info(f"Downloaded scaler from HDFS to local path: {local_scaler_path}")
-        
-        # Download metadata file from HDFS
-        hdfs_metadata_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/metadata_{timestamp}.json")
         metadata = {}
-        if fs.exists(hdfs_metadata_path):
-            output_stream = fs.open(hdfs_metadata_path)
-            java_input_stream = output_stream.getWrappedInputStream()
-            java_bytes = spark._jvm.org.apache.commons.io.IOUtils.toByteArray(java_input_stream)
-            py_bytes = bytes(java_bytes)
-            
-            with open(local_metadata_path, 'wb') as f:
-                f.write(py_bytes)
-                
-            output_stream.close()
-            
-            # Read the metadata
-            with open(local_metadata_path, 'r') as f:
+        if os.path.exists(metadata_file_path):
+            with open(metadata_file_path, 'r') as f:
                 metadata = json.load(f)
-                
-            logger.info(f"Downloaded metadata from HDFS to local path: {local_metadata_path}")
+            logger.info(f"Loaded metadata from local path: {metadata_file_path}")
         else:
-            logger.warning(f"Metadata file not found in HDFS: {hdfs_metadata_path}")
-        
-        # Load the model and scaler from local files
-        model = load_model(local_model_path)
-        scaler_data = np.load(local_scaler_path)
+            logger.warning(f"Metadata file not found: {metadata_file_path}. Proceeding without metadata.")
         
         return model, scaler_data, metadata
     
     except Exception as e:
-        logger.error(f"Error loading model files for {symbol}: {str(e)}")
+        logger.error(f"Error loading model files for {symbol} from local storage: {str(e)}")
         return None, None, None
 
+# HDFS related functions are removed:
+# - load_model_from_hdfs
+# - get_data_from_hdfs
 
-def get_recent_data(symbol, days=30, spark=None):
+def get_recent_data_from_mongodb(mongo_db, symbol, days=30):
     """
-    Get recent data for the symbol from processed data in HDFS or local storage
-    
-    Args:
-        symbol (str): Stock symbol
-        days (int): Number of recent days to retrieve
-        spark (SparkSession, optional): Spark session for HDFS access
-        
-    Returns:
-        pd.DataFrame: Recent data or None if not available
+    Get recent data for the symbol from the 'processed_{symbol}' collection in MongoDB.
     """
-    if USE_HDFS and spark is not None:
-        # Try to load from HDFS first
-        try:
-            return get_data_from_hdfs(symbol, days, spark)
-        except Exception as e:
-            logger.error(f"Error loading data from HDFS: {str(e)}")
-            logger.warning(f"Falling back to local storage for {symbol}")
-    
-    # Fall back to local filesystem if HDFS fails or is disabled
+    if mongo_db is None:
+        logger.warning(f"MongoDB connection not available for fetching processed data for {symbol}.")
+        return None
     try:
-        symbol_path = os.path.join(PROCESSED_DATA_PATH, symbol)
-        if not os.path.exists(symbol_path):
-            logger.error(f"No processed data directory found for {symbol}")
+        collection_name = f"processed_{symbol}"
+        if collection_name not in mongo_db.list_collection_names():
+            logger.warning(f"Processed data collection '{collection_name}' not found in MongoDB for {symbol}.")
+            return None
+
+        # Fetch the most recent 'days' records, sorted by date
+        # Assuming 'date' field is a datetime object or a string that can be sorted chronologically.
+        # If 'date' is string, ensure it's in YYYY-MM-DD format for correct sorting.
+        # For robust date handling, convert to datetime if it's string.
+        # For simplicity here, we assume 'date' can be sorted.
+        cursor = mongo_db[collection_name].find().sort("date", pymongo.DESCENDING).limit(days)
+        data_list = list(cursor)
+
+        if not data_list:
+            logger.info(f"No processed data found in MongoDB collection '{collection_name}' for {symbol}.")
+            return None
+
+        df = pd.DataFrame(data_list)
+        # Ensure 'date' column is datetime
+        if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
+            df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date', ascending=True) # Ensure ascending order for sequence
+        
+        # Drop MongoDB's _id if it exists
+        if '_id' in df.columns:
+            df = df.drop(columns=['_id'])
+
+        logger.info(f"Loaded {len(df)} recent records for {symbol} from MongoDB collection '{collection_name}'.")
+        return df
+    except Exception as e:
+        logger.error(f"Error loading recent data for {symbol} from MongoDB: {str(e)}")
+        return None
+
+def get_recent_data_from_local_backup(symbol, days=30):
+    """
+    Get recent data for the symbol from local Parquet backup.
+    """
+    try:
+        symbol_backup_path = os.path.join(PROCESSED_DATA_LOCAL_BACKUP_PATH, symbol)
+        if not os.path.exists(symbol_backup_path):
+            logger.warning(f"No local processed data backup directory found for {symbol} at {symbol_backup_path}")
             return None
         
-        # Find the most recent parquet file
-        parquet_files = glob.glob(os.path.join(symbol_path, "*.parquet"))
-        if not parquet_files:
-            logger.error(f"No Parquet files found for {symbol}")
+        # Find the most recent backup_{timestamp} directory
+        backup_dirs = [d for d in os.listdir(symbol_backup_path) if os.path.isdir(os.path.join(symbol_backup_path, d)) and d.startswith("backup_")]
+        if not backup_dirs:
+            logger.warning(f"No backup directories found in {symbol_backup_path}")
             return None
         
-        # Sort by modification time (newest first)
-        parquet_files.sort(key=os.path.getmtime, reverse=True)
-        latest_file = parquet_files[0]
+        backup_dirs.sort(reverse=True) # Get the latest timestamped backup
+        latest_backup_dir_path = os.path.join(symbol_backup_path, backup_dirs[0])
         
-        logger.info(f"Loading processed data from local path: {latest_file}")
+        # Parquet files are directly inside this timestamped directory
+        parquet_files = glob.glob(os.path.join(latest_backup_dir_path, "*.parquet"))
+        if not parquet_files: # Should be at least one part-xxxxx.parquet file
+             # Check for _SUCCESS file as an indicator if no direct parquet files found (less ideal)
+            success_file = os.path.join(latest_backup_dir_path, "_SUCCESS")
+            if os.path.exists(success_file): # Spark wrote output here
+                 df = pd.read_parquet(latest_backup_dir_path) # Read the directory
+            else:
+                logger.warning(f"No Parquet files or _SUCCESS file found in {latest_backup_dir_path} for {symbol}")
+                return None
+        else: # Read the first part file, or the whole dir if read_parquet handles it
+            df = pd.read_parquet(latest_backup_dir_path)
+
+
+        logger.info(f"Loading processed data from local backup: {latest_backup_dir_path}")
         
-        # Read the parquet file
-        df = pd.read_parquet(latest_file)
+        # Ensure 'date' column is datetime
+        if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
+            df['date'] = pd.to_datetime(df['date'])
         
-        # Sort by date and get the most recent days
-        df = df.sort_values('date')
+        df = df.sort_values('date', ascending=True)
         if len(df) > days:
-            df = df.tail(days)
+            df = df.tail(days) # Get the most recent 'days'
         
-        logger.info(f"Loaded {len(df)} recent records for {symbol} from local storage")
+        logger.info(f"Loaded {len(df)} recent records for {symbol} from local backup.")
         return df
         
     except Exception as e:
-        logger.error(f"Error loading recent data for {symbol} from local storage: {str(e)}")
+        logger.error(f"Error loading recent data for {symbol} from local backup: {str(e)}")
         return None
 
-def get_data_from_hdfs(symbol, days, spark):
+def get_recent_data(mongo_db, symbol, days=30, spark=None): # spark parameter is no longer used for HDFS
     """
-    Get recent data for the symbol from HDFS
+    Get recent data for the symbol.
+    Prioritizes MongoDB, then falls back to local Parquet backup.
+    HDFS loading has been removed.
     
     Args:
+        mongo_db (pymongo.database.Database): MongoDB connection
         symbol (str): Stock symbol
         days (int): Number of recent days to retrieve
-        spark (SparkSession): Spark session for HDFS access
+        spark (SparkSession, optional): No longer used.
         
     Returns:
         pd.DataFrame: Recent data or None if not available
     """
-    try:
-        # HDFS path for this symbol's processed data
-        hdfs_symbol_dir = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_PROCESSED_PATH}/{symbol}"
-        
-        # Get Hadoop filesystem
-        hadoop_conf = spark._jsc.hadoopConfiguration()
-        fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-        hdfs_dir_path = spark._jvm.org.apache.hadoop.fs.Path(hdfs_symbol_dir)
-        
-        if not fs.exists(hdfs_dir_path):
-            logger.error(f"HDFS directory not found: {hdfs_symbol_dir}")
-            return None
-        
-        # Get list of parquet files in the directory
-        file_statuses = fs.listStatus(hdfs_dir_path)
-        if file_statuses is None or len(file_statuses) == 0:
-            logger.error(f"No files found in HDFS path: {hdfs_symbol_dir}")
-            return None
-            
-        # Look for parquet files and sort by timestamp in the name
-        parquet_files = []
-        for status in file_statuses:
-            path = status.getPath().toString()
-            if "processed_" in path and path.endswith(".parquet"):
-                parquet_files.append(path)
-                
-        if not parquet_files:
-            logger.error(f"No parquet files found in HDFS for {symbol}")
-            return None
-            
-        # Sort parquet files by timestamp in filename (descending)
-        parquet_files.sort(reverse=True)
-        latest_file = parquet_files[0]
-        
-        logger.info(f"Loading processed data from HDFS: {latest_file}")
-        
-        # Read parquet file using Spark and convert to pandas
-        spark_df = spark.read.parquet(latest_file)
-        
-        # Convert to pandas for local processing
-        df = spark_df.toPandas()
-        
-        # Sort by date and get the most recent days
-        if 'date' in df.columns:
-            df = df.sort_values('date')
-            if len(df) > days:
-                df = df.tail(days)
-        
-        logger.info(f"Loaded {len(df)} recent records for {symbol} from HDFS")
+    logger.info(f"Fetching recent data for {symbol}...")
+    
+    # 1. Try MongoDB first
+    df = get_recent_data_from_mongodb(mongo_db, symbol, days)
+    if df is not None and not df.empty:
         return df
-        
-    except Exception as e:
-        logger.error(f"Error loading recent data for {symbol}: {str(e)}")
-        return None
+    
+    logger.warning(f"Could not fetch recent data for {symbol} from MongoDB. Falling back to local backup.")
+    
+    # 2. Fallback to local Parquet backup
+    df = get_recent_data_from_local_backup(symbol, days)
+    if df is not None and not df.empty:
+        return df
 
+    logger.error(f"Failed to load recent data for {symbol} from all available sources.")
+    return None
 
 def prepare_data_for_prediction(df, scaler_data, metadata):
     """
@@ -764,15 +610,15 @@ def process_symbol(es_client, mongo_db, symbol, spark=None):
         hostname = socket.gethostname()
         logger.info(f"Processing symbol {symbol} for predictions on node {hostname}")
         
-        # Load model files from HDFS or local storage
-        model, scaler_data, metadata = load_latest_model_files(symbol, spark)
+        # Load model files from local storage (HDFS part removed)
+        model, scaler_data, metadata = load_latest_model_files(symbol) # spark arg removed from call
         if model is None:
             logger.error(f"Failed to load model for {symbol}")
             return False
         
-        # Get recent data from HDFS or local storage
-        recent_data = get_recent_data(symbol, days=SEQUENCE_LENGTH, spark=spark)
-        if recent_data is None:
+        # Get recent data (prioritizes MongoDB, then local backup)
+        recent_data = get_recent_data(mongo_db, symbol, days=SEQUENCE_LENGTH) # spark arg removed
+        if recent_data is None or recent_data.empty:
             logger.error(f"Failed to get recent data for {symbol}")
             return False
         

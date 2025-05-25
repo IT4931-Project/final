@@ -37,12 +37,15 @@ logger = logging.getLogger("data_prep")
 load_dotenv()
 
 # Cấu hình
-PROCESSED_DATA_PATH = os.getenv('PROCESSED_DATA_PATH', '/app/data/processed')
-HDFS_NAMENODE = os.getenv('HDFS_NAMENODE', 'namenode')
-HDFS_NAMENODE_PORT = os.getenv('HDFS_NAMENODE_PORT', '8020')
-HDFS_PROCESSED_PATH = os.getenv('HDFS_PROCESSED_PATH', '/user/finance/processed')
+PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup')
+MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
+MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
+MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
+MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
+MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '12'))  # Default to 3 workers * 4 cores
+NUM_CORES_PER_WORKER = int(os.getenv('NUM_CORES_PER_WORKER', '2')) # From trainer.py
+NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', NUM_CORES_PER_WORKER)) # Adjusted for single worker
 SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', '30'))
 FUTURE_DAYS = int(os.getenv('FUTURE_DAYS', '7'))
 TRAIN_TEST_SPLIT = float(os.getenv('TRAIN_TEST_SPLIT', '0.8'))
@@ -60,19 +63,17 @@ def create_spark_session():
         spark = SparkSession.builder \
             .appName("Distributed Stock Price Prediction") \
             .master(SPARK_MASTER) \
+            .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
+            .config("spark.mongodb.input.uri", f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}") \
             .config("spark.sql.parquet.int96AsTimestamp", "true") \
             .config("spark.sql.legacy.parquet.nanosAsLong", "true") \
-            .config("spark.hadoop.fs.defaultFS", f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}") \
             .config("spark.sql.shuffle.partitions", NUM_PARTITIONS) \
             .config("spark.default.parallelism", NUM_PARTITIONS) \
-            .config("spark.executor.instances", "3") \
-            .config("spark.executor.cores", "2") \
-            .config("spark.executor.memory", "2g") \
-            .config("spark.driver.memory", "2g") \
+            .config("spark.executor.instances", "1") \
+            .config("spark.executor.cores", str(NUM_CORES_PER_WORKER)) \
+            .config("spark.executor.memory", "1g") \
+            .config("spark.driver.memory", "1g") \
             .config("spark.driver.maxResultSize", "1g") \
-            .config("spark.hadoop.dfs.replication", "3") \
-            .config("spark.hadoop.dfs.client.use.datanode.hostname", "true") \
-            .config("spark.hadoop.dfs.datanode.use.datanode.hostname", "true") \
             .config("spark.memory.fraction", "0.7") \
             .config("spark.memory.storageFraction", "0.3") \
             .getOrCreate()
@@ -87,120 +88,106 @@ def create_spark_session():
         logger.error(f"Error creating Spark session: {str(e)}")
         raise
 
-def load_data_from_hdfs(spark, symbol):
+def load_processed_data_from_mongo(spark, symbol):
     """
-    Tải dữ liệu đã xử lý từ HDFS
-    
-    Tham số:
-        spark (pyspark.sql.SparkSession): Phiên Spark
-        symbol (str): Mã cổ phiếu cần tải
-        
-    Trả về:
-        pyspark.sql.DataFrame: Dữ liệu đã tải
+    Tải dữ liệu đã xử lý từ MongoDB collection 'processed_{symbol}'.
     """
     try:
-        logger.info(f"Loading data for {symbol} from HDFS")
+        collection_name = f"processed_{symbol}"
+        logger.info(f"Attempting to load processed data for {symbol} from MongoDB collection: {collection_name}")
         
-        # Đường dẫn HDFS
-        hdfs_base_path = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_PROCESSED_PATH}/{symbol}"
+        df = spark.read \
+            .format("mongo") \
+            .option("database", MONGO_DATABASE) \
+            .option("collection", collection_name) \
+            .option("readPreference", "primary") \
+            .load()
+
+        if df.rdd.isEmpty():
+            logger.warning(f"No data found in MongoDB collection '{collection_name}' for {symbol}.")
+            return None
         
-        # Kiểm tra đường dẫn HDFS tồn tại
-        try:
-            hadoop_conf = spark._jsc.hadoopConfiguration()
-            hadoop_fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-            hdfs_path = spark._jvm.org.apache.hadoop.fs.Path(hdfs_base_path)
-            
-            if not hadoop_fs.exists(hdfs_path):
-                logger.error(f"HDFS path does not exist: {hdfs_base_path}")
-                
-                # Thử load từ local backup nếu không tìm thấy trong HDFS
-                logger.info(f"Trying to load from local backup")
-                return load_data_from_local_backup(spark, symbol)
-        except Exception as e:
-            logger.error(f"Error checking HDFS path: {str(e)}")
-            return load_data_from_local_backup(spark, symbol)
-            
-        # Lấy danh sách các thư mục con trong HDFS
-        # (Mỗi thư mục con là một parquet file)
-        file_statuses = hadoop_fs.listStatus(hdfs_path)
-        if file_statuses is None or len(file_statuses) == 0:
-            logger.error(f"No files found in HDFS path: {hdfs_base_path}")
-            return load_data_from_local_backup(spark, symbol)
-            
-        # Sắp xếp theo thời gian tạo (mới nhất trước)
-        # Đường dẫn thường có dạng .../processed_20250510.parquet
-        file_paths = []
-        for status in file_statuses:
-            path = status.getPath().toString()
-            if "parquet" in path:
-                file_paths.append(path)
-                
-        if not file_paths:
-            logger.error(f"No Parquet files found in HDFS for {symbol}")
-            return load_data_from_local_backup(spark, symbol)
-            
-        # Sắp xếp theo thời gian trong tên file (giả sử tên có format processed_YYYYMMDD.parquet)
-        file_paths.sort(reverse=True)
-        latest_file = file_paths[0]
+        # Ensure 'date' column is present and sort by it
+        if "date" not in df.columns:
+            logger.error(f"'date' column not found in MongoDB data for {symbol}.")
+            return None # Or handle as per requirements
+
+        df = df.orderBy(col("date").asc())
         
-        logger.info(f"Loading processed data from HDFS: {latest_file}")
-        
-        # Đọc file parquet từ HDFS
-        df = spark.read.parquet(latest_file)
-        
-        # Repartition để phân tán xử lý
+        # Repartition for further processing
         df = df.repartition(NUM_PARTITIONS)
         
-        logger.info(f"Loaded {df.count()} records from HDFS for {symbol} distributed across {NUM_PARTITIONS} partitions")
-        
+        logger.info(f"Loaded {df.count()} records from MongoDB for {symbol} distributed across {NUM_PARTITIONS} partitions")
         return df
         
     except Exception as e:
-        logger.error(f"Error loading data from HDFS: {str(e)}")
-        return load_data_from_local_backup(spark, symbol)
+        logger.error(f"Error loading data from MongoDB for {symbol}: {str(e)}")
+        return None
 
 def load_data_from_local_backup(spark, symbol):
     """
-    Tải dữ liệu từ backup local nếu HDFS không khả dụng
-    
-    Tham số:
-        spark (pyspark.sql.SparkSession): Phiên Spark
-        symbol (str): Mã cổ phiếu cần tải
-        
-    Trả về:
-        pyspark.sql.DataFrame: Dữ liệu đã tải
+    Tải dữ liệu từ backup local Parquet.
     """
     try:
-        logger.info(f"Loading data for {symbol} from local backup")
+        logger.info(f"Attempting to load data for {symbol} from local Parquet backup path: {PROCESSED_DATA_LOCAL_BACKUP_PATH}")
         
-        # Đường dẫn đến dữ liệu đã xử lý cho mã cổ phiếu này
-        symbol_path = os.path.join(PROCESSED_DATA_PATH, symbol)
-        
-        if not os.path.exists(symbol_path):
-            logger.error(f"No processed data directory found for {symbol}")
+        symbol_backup_path = os.path.join(PROCESSED_DATA_LOCAL_BACKUP_PATH, symbol)
+        if not os.path.exists(symbol_backup_path):
+            logger.warning(f"No local processed data backup directory found for {symbol} at {symbol_backup_path}")
             return None
         
-        # Tìm file parquet mới nhất
-        parquet_files = glob.glob(os.path.join(symbol_path, "*.parquet"))
-        if not parquet_files:
-            logger.error(f"No Parquet files found for {symbol}")
+        # Find the most recent backup_{timestamp} directory
+        backup_dirs = [d for d in os.listdir(symbol_backup_path) if os.path.isdir(os.path.join(symbol_backup_path, d)) and d.startswith("backup_")]
+        if not backup_dirs:
+            logger.warning(f"No backup directories (backup_YYYYMMDD_HHMMSS) found in {symbol_backup_path}")
             return None
         
-        # Sắp xếp theo thời gian chỉnh sửa (mới nhất trước)
-        parquet_files.sort(key=os.path.getmtime, reverse=True)
-        latest_file = parquet_files[0]
+        backup_dirs.sort(reverse=True) # Get the latest timestamped backup
+        latest_backup_dir_path = os.path.join(symbol_backup_path, backup_dirs[0])
         
-        logger.info(f"Loading processed data from local backup: {latest_file}")
+        logger.info(f"Loading processed data from latest local backup directory: {latest_backup_dir_path}")
         
-        # Đọc file parquet
-        df = spark.read.parquet(latest_file)
-        logger.info(f"Loaded {df.count()} records for {symbol} from local backup")
-        
+        # Spark reads the directory containing Parquet part-files
+        df = spark.read.parquet(latest_backup_dir_path)
+
+        if df.rdd.isEmpty():
+            logger.warning(f"No data found in local Parquet backup at {latest_backup_dir_path} for {symbol}.")
+            return None
+
+        if "date" not in df.columns:
+            logger.error(f"'date' column not found in local Parquet backup for {symbol}.")
+            return None
+            
+        df = df.orderBy(col("date").asc())
+        df = df.repartition(NUM_PARTITIONS)
+        logger.info(f"Loaded {df.count()} records for {symbol} from local Parquet backup.")
         return df
         
     except Exception as e:
-        logger.error(f"Error loading data from Parquet: {str(e)}")
+        logger.error(f"Error loading data from local Parquet backup for {symbol}: {str(e)}")
         return None
+
+def load_data_for_symbol(spark, symbol):
+    """
+    Tải dữ liệu cho một mã cổ phiếu.
+    Ưu tiên MongoDB, sau đó fallback về local Parquet backup.
+    """
+    logger.info(f"Loading data for symbol: {symbol}")
+    
+    # 1. Thử tải từ MongoDB
+    df = load_processed_data_from_mongo(spark, symbol)
+    if df is not None and not df.rdd.isEmpty():
+        return df
+    
+    logger.warning(f"Failed to load data for {symbol} from MongoDB. Attempting local Parquet backup.")
+    
+    # 2. Fallback về local Parquet backup
+    df = load_data_from_local_backup(spark, symbol)
+    if df is not None and not df.rdd.isEmpty():
+        return df
+        
+    logger.error(f"Failed to load data for {symbol} from all sources.")
+    return None
 
 def add_technical_indicators(spark_df, date_col="date", window_size=3):
     """
@@ -369,8 +356,8 @@ def prepare_data_for_training(symbol, train_ratio=TRAIN_TEST_SPLIT):
         # Tạo phiên Spark phân tán
         spark = create_spark_session()
         
-        # Tải dữ liệu từ HDFS
-        df = load_data_from_hdfs(spark, symbol)
+        # Tải dữ liệu (MongoDB first, then local backup)
+        df = load_data_for_symbol(spark, symbol)
         if df is None:
             logger.error(f"Failed to load data for {symbol}")
             return None, None, 0, None

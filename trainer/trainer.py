@@ -44,17 +44,14 @@ logger = logging.getLogger("trainer")
 # Tải biến môi trường
 load_dotenv()
 
-# Cấu hình HDFS và Spark
-MODEL_PATH = os.getenv('MODEL_PATH', '/app/data/models')
-HDFS_NAMENODE = os.getenv('HDFS_NAMENODE', 'namenode')
-HDFS_NAMENODE_PORT = os.getenv('HDFS_NAMENODE_PORT', '8020')
-HDFS_MODEL_PATH = os.getenv('HDFS_MODEL_PATH', '/user/finance/models')
+# Cấu hình Spark
+MODEL_PATH = os.getenv('MODEL_PATH', '/app/data/models') # Local path for models
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-NUM_WORKERS = int(os.getenv('NUM_WORKERS', '3'))  # Number of spark workers
-NUM_CORES_PER_WORKER = int(os.getenv('NUM_CORES_PER_WORKER', '4'))
-WORKER_MEMORY = os.getenv('WORKER_MEMORY', '4g')
-NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '12'))  # Default to 3 workers * 4 cores
-USE_HOROVOD = os.getenv('USE_HOROVOD', 'true').lower() == 'true'
+NUM_WORKERS = int(os.getenv('NUM_WORKERS', '1'))  # Number of spark workers (simplified to 1)
+NUM_CORES_PER_WORKER = int(os.getenv('NUM_CORES_PER_WORKER', '2')) # Cores for the single worker
+WORKER_MEMORY = os.getenv('WORKER_MEMORY', '2g') # Memory for the single worker
+NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', NUM_CORES_PER_WORKER)) # Partitions for the single worker
+USE_HOROVOD = os.getenv('USE_HOROVOD', 'false').lower() == 'true' # Horovod might be complex for simplified setup
 USE_MULTI_WORKER = os.getenv('USE_MULTI_WORKER', 'true').lower() == 'true'
 LOG_DIR = os.getenv('LOG_DIR', '/app/logs/tensorboard')
 
@@ -221,60 +218,8 @@ def save_model_files(model, scaler, metrics, metadata, symbol, spark=None):
             f.write(timestamp)
         logger.info(f"Updated local latest.txt to point to {timestamp}")
         
-        # 5. Copy files to HDFS 
-        if spark is not None:
-            try:
-                logger.info(f"Copying model files to HDFS")
-                
-                # Get the Hadoop filesystem
-                hadoop_conf = spark._jsc.hadoopConfiguration()
-                fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-                
-                # Create HDFS directory
-                hdfs_symbol_dir = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_MODEL_PATH}/{symbol}"
-                hdfs_dir_path = spark._jvm.org.apache.hadoop.fs.Path(hdfs_symbol_dir)
-                
-                if not fs.exists(hdfs_dir_path):
-                    fs.mkdirs(hdfs_dir_path)
-                    logger.info(f"Created HDFS directory: {hdfs_symbol_dir}")
-                
-                # Copy model file to HDFS
-                local_model_path = spark._jvm.org.apache.hadoop.fs.Path(model_path)
-                hdfs_model_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/model_{timestamp}.h5")
-                fs.copyFromLocalFile(False, True, local_model_path, hdfs_model_path)
-                logger.info(f"Copied model to HDFS: {hdfs_model_path}")
-                
-                # Copy scaler file to HDFS
-                if hasattr(scaler, 'scale_'):
-                    local_scaler_path = spark._jvm.org.apache.hadoop.fs.Path(scaler_path)
-                    hdfs_scaler_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/scaler_{timestamp}.npz")
-                    fs.copyFromLocalFile(False, True, local_scaler_path, hdfs_scaler_path)
-                    logger.info(f"Copied scaler to HDFS: {hdfs_scaler_path}")
-                
-                # Copy metadata file to HDFS
-                local_metadata_path = spark._jvm.org.apache.hadoop.fs.Path(metadata_path)
-                hdfs_metadata_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/metadata_{timestamp}.json")
-                fs.copyFromLocalFile(False, True, local_metadata_path, hdfs_metadata_path)
-                logger.info(f"Copied metadata to HDFS: {hdfs_metadata_path}")
-                
-                # Create latest.txt in HDFS
-                hdfs_latest_path = spark._jvm.org.apache.hadoop.fs.Path(f"{hdfs_symbol_dir}/latest.txt")
-                
-                # Create a temporary local file with the timestamp
-                temp_latest_path = "/tmp/latest.txt"
-                with open(temp_latest_path, 'w') as f:
-                    f.write(timestamp)
-                
-                # Copy the file to HDFS
-                local_latest_path = spark._jvm.org.apache.hadoop.fs.Path(temp_latest_path)
-                fs.copyFromLocalFile(False, True, local_latest_path, hdfs_latest_path)
-                
-                logger.info(f"Updated HDFS latest.txt to point to {timestamp}")
-                
-            except Exception as hdfs_e:
-                logger.error(f"Error copying files to HDFS: {str(hdfs_e)}")
-                logger.warning("Continuing with local files only")
-        
+        # HDFS saving is removed for simplification. Models are saved locally.
+        logger.info("Model, scaler, and metadata saved locally. HDFS saving is skipped.")
         return True
     
     except Exception as e:
@@ -376,11 +321,11 @@ def train_model_for_symbol(symbol, spark=None):
             logger.info("Initializing Orca context with distributed settings")
             init_orca_context(
                 cluster_mode="spark", 
-                cores=NUM_CORES_PER_WORKER,
-                memory=WORKER_MEMORY,
-                num_nodes=NUM_WORKERS,
-                driver_cores=4,
-                driver_memory="4g"
+                cores=NUM_CORES_PER_WORKER, # Cores per worker node
+                memory=WORKER_MEMORY,       # Memory per worker node
+                num_nodes=NUM_WORKERS,      # Number of worker nodes (should be 1 for simplified setup)
+                driver_cores=2,             # Cores for the driver
+                driver_memory="2g"          # Memory for the driver
             )
             
             # Tạo Orca Estimator với model creator và distributed configs
@@ -455,15 +400,7 @@ def train_model_for_symbol(symbol, spark=None):
             
             # Save model - only the main worker in distributed training
             if is_main_worker:
-                save_model_files(model, scaler_model, metrics, metadata, symbol, spark)
-            
-            # Get Spark session for HDFS operations
-            if spark is None:
-                try:
-                    from pyspark.sql import SparkSession
-                    spark = SparkSession.builder.getOrCreate()
-                except Exception as e:
-                    logger.warning(f"Could not get SparkSession for HDFS operations: {e}")
+                save_model_files(model, scaler_model, metrics, metadata, symbol, None) # Pass None for spark
             
             # Dừng Orca context
             stop_orca_context()
@@ -505,34 +442,7 @@ def main():
     # Tạo thư mục log cho TensorBoard
     os.makedirs(LOG_DIR, exist_ok=True)
     
-    # Tạo SparkSession cho HDFS operations
-    try:
-        from pyspark.sql import SparkSession
-        spark = SparkSession.builder \
-            .appName("Model Training HDFS Access") \
-            .config("spark.hadoop.fs.defaultFS", f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}") \
-            .getOrCreate()
-        
-        # Check HDFS connection
-        try:
-            hadoop_conf = spark._jsc.hadoopConfiguration()
-            fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(hadoop_conf)
-            
-            # Create the base model directory
-            hdfs_base_path = f"hdfs://{HDFS_NAMENODE}:{HDFS_NAMENODE_PORT}{HDFS_MODEL_PATH}"
-            hdfs_path = spark._jvm.org.apache.hadoop.fs.Path(hdfs_base_path)
-            
-            if not fs.exists(hdfs_path):
-                fs.mkdirs(hdfs_path)
-                logger.info(f"Created HDFS base directory for models: {hdfs_base_path}")
-        except Exception as e:
-            logger.error(f"Error accessing HDFS: {str(e)}")
-            logger.warning("Will save models to local filesystem only")
-            spark = None
-    except Exception as e:
-        logger.error(f"Could not create SparkSession: {str(e)}")
-        logger.warning("Will save models to local filesystem only")
-        spark = None
+    spark = None # No HDFS, so no need for a separate Spark session here for HDFS ops
     
     # Determine if we're using distributed training
     if USE_HOROVOD:
@@ -579,8 +489,8 @@ def main():
         logger.info(f"Training job completed. Successfully trained models for {success_count}/{len(SYMBOLS)} symbols")
     
     # Clean up
-    if spark is not None:
-        spark.stop()
+    # if spark is not None: # spark is None now
+    #     spark.stop()
 
 if __name__ == "__main__":
     main()

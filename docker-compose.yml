@@ -43,73 +43,6 @@ services:
         condition: service_healthy
     restart: "no"
     command: python3 /scripts/mongo_init.py
-  # HDFS NameNode
-  namenode:
-    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
-    container_name: finance_hdfs_namenode
-    volumes:
-      - hadoop_namenode:/hadoop/dfs/name
-    environment:
-      - CLUSTER_NAME=finance_hadoop
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-      - CORE_CONF_hadoop_http_staticuser_user=root
-      - HDFS_CONF_dfs_replication=3
-      - HDFS_CONF_dfs_permissions=false
-    ports:
-      - "9870:9870"
-      - "8020:8020"
-    networks:
-      - finance_network
-    restart: unless-stopped
-
-  # HDFS DataNode 1
-  datanode1:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
-    container_name: finance_hdfs_datanode1
-    volumes:
-      - hadoop_datanode1:/hadoop/dfs/data
-    environment:
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
-      - SERVICE_PRECONDITION=namenode:9870
-    depends_on:
-      - namenode
-    networks:
-      - finance_network
-    restart: unless-stopped
-
-  # HDFS DataNode 2
-  datanode2:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
-    container_name: finance_hdfs_datanode2
-    volumes:
-      - hadoop_datanode2:/hadoop/dfs/data
-    environment:
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
-      - SERVICE_PRECONDITION=namenode:9870
-    depends_on:
-      - namenode
-    networks:
-      - finance_network
-    restart: unless-stopped
-
-  # HDFS DataNode 3
-  datanode3:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
-    container_name: finance_hdfs_datanode3
-    volumes:
-      - hadoop_datanode3:/hadoop/dfs/data
-    environment:
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
-      - SERVICE_PRECONDITION=namenode:9870
-    depends_on:
-      - namenode
-    networks:
-      - finance_network
-    restart: unless-stopped
-
   # Zookeeper Ensemble
   zookeeper1:
     image: confluentinc/cp-zookeeper:7.2.0
@@ -197,31 +130,6 @@ services:
       - SPARK_CONF_DIR=/spark/conf
     ports:
       - "8081:8081"
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./spark-conf:/spark/conf
-    networks:
-      - finance_network
-    depends_on:
-      - spark-master
-    restart: unless-stopped
-
-  # Spark Worker 2
-  spark-worker2:
-    build:
-      context: ./docker
-      dockerfile: spark.Dockerfile
-    container_name: finance_spark_worker2
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_CORES=2
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_WEBUI_PORT=8082
-      - SPARK_CONF_DIR=/spark/conf
-    ports:
-      - "8082:8081"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -328,11 +236,6 @@ services:
     depends_on:
       - spark-master
       - spark-worker1
-      - spark-worker2
-      - namenode
-      - datanode1
-      - datanode2
-      - datanode3
       - mongodb
 
   # Model Training Service
@@ -351,17 +254,12 @@ services:
       - SPARK_MASTER=spark://spark-master:7077
       - HADOOP_CONF_DIR=/etc/hadoop/conf
       - YARN_CONF_DIR=/etc/hadoop/conf
-      - TF_CONFIG=${TF_CONFIG:-'{"cluster":{"worker":["trainer:2222","spark-worker1:2223","spark-worker2:2224"]},"task":{"type":"worker","index":0}}'}
+      - TF_CONFIG=${TF_CONFIG:-'{"cluster":{"worker":["trainer:2222","spark-worker1:2223"]},"task":{"type":"worker","index":0}}'}
     networks:
       - finance_network
     depends_on:
       - spark-master
       - spark-worker1
-      - spark-worker2
-      - namenode
-      - datanode1
-      - datanode2
-      - datanode3
 
   # Model Inference Service
   inference:
@@ -383,7 +281,6 @@ services:
     depends_on:
       - elasticsearch-master
       - mongodb
-      - namenode
 
   # Scheduler Service
   scheduler:
@@ -404,7 +301,6 @@ services:
       - mongodb
       - spark-master
       - elasticsearch-master
-      - namenode
     restart: unless-stopped
 
 networks:
@@ -415,12 +311,7 @@ volumes:
   # MongoDB volume (single instance)
   mongodb_data:
   
-  # HDFS volumes
-  hadoop_namenode:
-  hadoop_datanode1:
-  hadoop_datanode2:
-  hadoop_datanode3:
   
   # Elasticsearch volumes
   es_master_data: # Volume for the single Elasticsearch node
-  # es_data1_data, es_data2_data, and es_data3_data are no longer needed
+  # es_data1_data, es_data2_data, and es_data3_data were removed with ES cluster simplification
