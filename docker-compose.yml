@@ -202,8 +202,8 @@ services:
     container_name: finance_kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch-master:9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD} # Use a dedicated password for Kibana's internal user
     ports:
       - "${KIBANA_PORT}:5601"
     networks:
