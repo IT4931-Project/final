@@ -207,7 +207,8 @@ services:
     networks:
       - finance_network
     depends_on:
-      - elasticsearch-master
+      elasticsearch-master:
+        condition: service_healthy
     restart: unless-stopped
 
   dashboard-importer:
