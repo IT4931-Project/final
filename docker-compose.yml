@@ -93,6 +93,24 @@ services:
       - finance_network
     restart: unless-stopped
 
+  kafka-topic-setup:
+    build:
+      context: .
+      dockerfile: ./kafka-consumer/Dockerfile # Reuses kafka-consumer's build environment
+    container_name: finance_kafka_topic_setup
+    hostname: kafka-topic-setup
+    networks:
+      - finance_network
+    env_file:
+      - .env # For KAFKA_BOOTSTRAP_SERVERS and topic names
+    command: ["python", "/app/setup_topics.py"] # Assumes setup_topics.py is in /app
+    depends_on:
+      kafka-broker1:
+        condition: service_healthy # Wait for Kafka broker to be healthy
+      zookeeper1: # Also depends on Zookeeper for Kafka to be truly ready
+        condition: service_healthy
+    restart: "no" # Run once and exit
+
   # Spark Master
   spark-master:
     build:
