@@ -1,14 +1,17 @@
 FROM python:3.9.18-slim
 
-# Install system dependencies (removed openjdk, wget, git as they are likely not needed for sklearn)
-# If any Python package in requirements.txt needs build tools, add 'build-essential'
+# Install system dependencies
+# Adding openjdk-11 back as PySpark in data_prep.py needs it to connect to Spark master for MongoDB loading
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    openjdk-11-jdk-headless \
     build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# JAVA_HOME not needed if not running a local Spark JVM context for the trainer itself
+# Set JAVA_HOME for PySpark
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
 
 # Set working directory
 WORKDIR /app
