@@ -134,7 +134,7 @@ def create_spark_session():
             .config("spark.es.nodes", ES_NODES) \
             .config("spark.es.port", ES_PORT) \
             .config("spark.es.nodes.wan.only", "true") \
-            .config("spark.es.resource", f"{ES_INDEX_PREFIX}_{{symbol}}/_doc") \
+            .config("spark.es.resource", f"{ES_INDEX_PREFIX}_{{symbol}}") \
             .config("spark.es.mapping.id", "row_id") \
             .config("spark.es.write.operation", "upsert") \
             .config("spark.executor.instances", "1") \
@@ -498,7 +498,7 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
 
             df_with_symbol_for_es.write \
                 .format("org.elasticsearch.spark.sql") \
-                .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol}/_doc") \
+                .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol}") \
                 .mode("overwrite") \
                 .save()
 
