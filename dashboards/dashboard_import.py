@@ -27,8 +27,7 @@ load_dotenv(dotenv_path='/app/.env', override=True)
 # Configuration
 ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'elasticsearch-master')
 ELASTICSEARCH_PORT = int(os.getenv('ELASTICSEARCH_PORT', 9200))
-ELASTICSEARCH_USERNAME = os.getenv('ELASTICSEARCH_USERNAME', 'elastic')
-ELASTICSEARCH_PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD', 'devpassword123') # Updated fallback
+# ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD are not needed when security is disabled
 KIBANA_HOST = os.getenv('KIBANA_HOST', 'kibana') # Kibana host often matches the service name
 KIBANA_PORT = int(os.getenv('KIBANA_PORT', 5601))
 
@@ -38,7 +37,7 @@ def wait_for_kibana():
     retries = 30
     for i in range(retries):
         try:
-            response = requests.get(kibana_url, auth=(ELASTICSEARCH_USERNAME, ELASTICSEARCH_PASSWORD))
+            response = requests.get(kibana_url) # auth removed
             if response.status_code == 200:
                 logger.info("Kibana is ready")
                 return True
@@ -70,7 +69,7 @@ def import_dashboards():
                         url,
                         headers=headers,
                         files=files,
-                        auth=(ELASTICSEARCH_USERNAME, ELASTICSEARCH_PASSWORD),
+                        # auth removed
                         params={"overwrite": "true"}
                     )
                 

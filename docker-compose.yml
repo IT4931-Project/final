@@ -174,8 +174,7 @@ services:
       - cluster.name=finance-es-cluster
       - discovery.type=single-node             # Critical for single-node operation
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=true              # Keep security enabled as Kibana uses it
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - xpack.security.enabled=false             # Disable Elasticsearch security
       - bootstrap.memory_lock=true
     ulimits:
       memlock:
@@ -189,7 +188,7 @@ services:
     networks:
       - finance_network
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"] # Healthcheck without credentials
       interval: 10s
       timeout: 5s
       retries: 10
@@ -202,8 +201,7 @@ services:
     container_name: finance_kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch-master:9200
-      - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD} # Use a dedicated password for Kibana's internal user
+      # ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD removed as security is disabled
     ports:
       - "${KIBANA_PORT}:5601"
     networks:
