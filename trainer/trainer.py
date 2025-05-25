@@ -28,8 +28,9 @@ import socket
 import joblib # For saving scikit-learn models
 
 # Import our custom modules
-from trainer.model import create_random_forest_regressor # Changed model import
-from trainer.data_prep import prepare_data_for_training # This will return X_train, X_val, y_train, y_val, num_features, target_scaler
+# Assuming model.py, data_prep.py, and trainer.py are all in /app/ directory in the container
+from model import create_random_forest_regressor
+from data_prep import prepare_data_for_training
 
 # Thiết lập logging
 logging.basicConfig(
