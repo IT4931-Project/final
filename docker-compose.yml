@@ -206,6 +206,23 @@ services:
       - elasticsearch-master
     restart: unless-stopped
 
+  dashboard-importer:
+    build:
+      context: .
+      dockerfile: ./dashboards/Dockerfile
+    container_name: finance_dashboard_importer
+    hostname: dashboard-importer
+    networks:
+      - finance_network
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      kibana:
+        condition: service_started # The import script has its own wait logic for Kibana API
+      elasticsearch-master:
+        condition: service_healthy
+    restart: "no"
+
   # Crawler Service
   crawler:
     build:
