@@ -496,13 +496,21 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
             else:
                 df_with_symbol_for_es = df_to_write
 
-            df_with_symbol_for_es.write \
+            # Drop the MongoDB '_id' field before writing to Elasticsearch
+            # as ES uses its own _id metadata field and 'row_id' is mapped to it.
+            if "_id" in df_with_symbol_for_es.columns:
+                df_for_es = df_with_symbol_for_es.drop("_id")
+                logger.info("Dropped MongoDB '_id' column before writing to Elasticsearch.")
+            else:
+                df_for_es = df_with_symbol_for_es
+            
+            df_for_es.write \
                 .format("org.elasticsearch.spark.sql") \
                 .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol.lower()}") \
                 .mode("overwrite") \
                 .save()
 
-            logger.info(f"Successfully wrote {df_with_symbol_for_es.count()} records to Elasticsearch index {ES_INDEX_PREFIX}_{symbol}")
+            logger.info(f"Successfully wrote {df_for_es.count()} records to Elasticsearch index {ES_INDEX_PREFIX}_{symbol.lower()}")
 
         except Exception as es_ex:
             logger.error(f"Error writing data to Elasticsearch for {symbol}: {str(es_ex)}")
