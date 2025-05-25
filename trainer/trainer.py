@@ -42,31 +42,33 @@ logging.basicConfig(
 logger = logging.getLogger("trainer")
 
 # Tải biến môi trường
-load_dotenv()
+# Explicitly load .env from /app/.env and override existing env vars
+# This requires .env to be copied to /app/.env in the Dockerfile
+load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Cấu hình Spark
 MODEL_PATH = os.getenv('MODEL_PATH', '/app/data/models') # Local path for models
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-NUM_WORKERS = int(os.getenv('NUM_WORKERS', '1'))  # Number of spark workers (simplified to 1)
-NUM_CORES_PER_WORKER = int(os.getenv('NUM_CORES_PER_WORKER', '2')) # Cores for the single worker
-WORKER_MEMORY = os.getenv('WORKER_MEMORY', '2g') # Memory for the single worker
-NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', NUM_CORES_PER_WORKER)) # Partitions for the single worker
-USE_HOROVOD = os.getenv('USE_HOROVOD', 'false').lower() == 'true' # Horovod might be complex for simplified setup
+NUM_WORKERS = int(os.getenv('NUM_WORKERS', 1))  # Number of spark workers
+NUM_CORES_PER_WORKER = int(os.getenv('NUM_CORES_PER_WORKER', 2)) # Cores for the worker
+WORKER_MEMORY = os.getenv('WORKER_MEMORY', '2g') # Memory for the worker
+NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', NUM_CORES_PER_WORKER)) # Partitions for the worker
+USE_HOROVOD = os.getenv('USE_HOROVOD', 'false').lower() == 'true'
 USE_MULTI_WORKER = os.getenv('USE_MULTI_WORKER', 'true').lower() == 'true'
 LOG_DIR = os.getenv('LOG_DIR', '/app/logs/tensorboard')
 
 # Tham số huấn luyện
-SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', '30'))
-FUTURE_DAYS = int(os.getenv('FUTURE_DAYS', '7'))
-BATCH_SIZE = int(os.getenv('BATCH_SIZE', '64'))
+SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', 30))
+FUTURE_DAYS = int(os.getenv('FUTURE_DAYS', 7))
+BATCH_SIZE = int(os.getenv('BATCH_SIZE', 64))
 GLOBAL_BATCH_SIZE = BATCH_SIZE * NUM_WORKERS  # For distributed training
-EPOCHS = int(os.getenv('EPOCHS', '50'))
-PATIENCE = int(os.getenv('PATIENCE', '10'))
-TRAIN_TEST_SPLIT = float(os.getenv('TRAIN_TEST_SPLIT', '0.8'))
-LEARNING_RATE = float(os.getenv('LEARNING_RATE', '0.001'))
-HIDDEN_UNITS = int(os.getenv('HIDDEN_UNITS', '64'))
-DROPOUT_RATE = float(os.getenv('DROPOUT_RATE', '0.1'))
-ATTENTION_HEADS = int(os.getenv('ATTENTION_HEADS', '4'))
+EPOCHS = int(os.getenv('EPOCHS', 50))
+PATIENCE = int(os.getenv('PATIENCE', 10))
+TRAIN_TEST_SPLIT = float(os.getenv('TRAIN_TEST_SPLIT', 0.8))
+LEARNING_RATE = float(os.getenv('LEARNING_RATE', 0.001))
+HIDDEN_UNITS = int(os.getenv('HIDDEN_UNITS', 64))
+DROPOUT_RATE = float(os.getenv('DROPOUT_RATE', 0.1))
+ATTENTION_HEADS = int(os.getenv('ATTENTION_HEADS', 4))
 
 # Mã cổ phiếu để huấn luyện mô hình
 SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')

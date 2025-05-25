@@ -34,7 +34,9 @@ logging.basicConfig(
 logger = logging.getLogger("inference")
 
 # Load environment variables
-load_dotenv()
+# Explicitly load .env from /app/.env and override existing env vars
+# This requires .env to be copied to /app/.env in the Dockerfile
+load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Configuration
 PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup') # For fallback
@@ -46,23 +48,24 @@ MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
 MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
-MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
-MONGO_AUTH_SOURCE = 'admin' # Hardcoding auth source to 'admin'
+MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'devpassword123') # Updated fallback
+MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin') # Updated fallback
 
 # Elasticsearch Cluster Configuration
 ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'elasticsearch-master')
 ELASTICSEARCH_PORT = int(os.getenv('ELASTICSEARCH_PORT', 9200))
 ELASTICSEARCH_USERNAME = os.getenv('ELASTICSEARCH_USERNAME', 'elastic')
-ELASTICSEARCH_PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD', 'changeme')
+ELASTICSEARCH_PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD', 'devpassword123') # Updated fallback for ES
 USE_ELASTICSEARCH = os.getenv('USE_ELASTICSEARCH', 'true').lower() == 'true'
 
 # Spark Configuration for distributed processing
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '2'))  # Adjusted for single worker
+NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', 2))  # Default to 2 if not set
 
 # Inference parameters
-SEQUENCE_LENGTH = 30  # Number of days to look back
-FUTURE_DAYS = 7       # Number of days to predict
+# These are typically fixed based on the model, but can be env vars if needed
+SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', 30))
+FUTURE_DAYS = int(os.getenv('FUTURE_DAYS', 7))
 
 # Stock symbols to make predictions for
 SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')

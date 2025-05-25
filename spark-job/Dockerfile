@@ -19,6 +19,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy the .env file from the project root (one level up from the Dockerfile's context)
+# to /app/.env in the container.
+COPY ../.env /app/.env
+
 # Copy source code
 COPY . .
 

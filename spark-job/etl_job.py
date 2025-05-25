@@ -36,19 +36,22 @@ logging.basicConfig(
 logger = logging.getLogger("etl_job")
 
 # Load environment variables
-load_dotenv()
+# Explicitly load .env from /app/.env and override existing env vars
+# This requires .env to be copied to /app/.env in the Dockerfile
+load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Configuration
 MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
 MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
-MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
-MONGO_AUTH_SOURCE = 'admin' # Hardcoding auth source to 'admin'
+MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'devpassword123') # Updated fallback
+MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin') # Updated fallback
 RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
 PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup')
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '12'))  # Default to 3 workers * 4 cores
+# Default NUM_PARTITIONS to a reasonable value if not set, e.g., 4
+NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '4'))
 
 # Stock symbols to process (should match what the crawler collects)
 SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')

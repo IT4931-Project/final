@@ -27,11 +27,13 @@ logging.basicConfig(
 logger = logging.getLogger("kafka_consumer")
 
 # Tải biến môi trường
-load_dotenv()
+# Explicitly load .env from /app/.env and override existing env vars
+# This requires .env to be copied to /app/.env in the Dockerfile
+load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Cấu hình Kafka
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka-broker1:9092')
-KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC', 'stock_ohlcv')
+KAFKA_TOPIC_OHLCV = os.getenv('KAFKA_TOPIC_OHLCV', 'stock_ohlcv') # Corrected key name
 KAFKA_TOPIC_ACTIONS = os.getenv('KAFKA_TOPIC_ACTIONS', 'stock_actions')
 KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
 KAFKA_GROUP_ID = os.getenv('KAFKA_GROUP_ID', 'stock_consumer_group')
@@ -42,8 +44,8 @@ MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
 MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
-MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'password')
-MONGO_AUTH_SOURCE = 'admin' # Hardcoding auth source to 'admin'
+MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'devpassword123') # Updated fallback
+MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin') # Updated fallback
 
 def connect_to_mongodb():
     """
