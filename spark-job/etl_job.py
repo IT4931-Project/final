@@ -133,10 +133,10 @@ def create_spark_session():
             .config("spark.default.parallelism", NUM_PARTITIONS) \
             .config("spark.es.nodes", ES_NODES) \
             .config("spark.es.port", ES_PORT) \
-            .config("spark.es.nodes.wan.only", "true") # Important for Docker environments if ES is on a different network segment or for discovery
-            .config("spark.es.resource", f"{ES_INDEX_PREFIX}_{{symbol}}/_doc") # Dynamic index per symbol, _doc for ES 7+ type
-            .config("spark.es.mapping.id", "row_id") # Use 'row_id' as the document ID in Elasticsearch
-            .config("spark.es.write.operation", "upsert") # Use upsert to update existing docs or insert new ones
+            .config("spark.es.nodes.wan.only", "true") \
+            .config("spark.es.resource", f"{ES_INDEX_PREFIX}_{{symbol}}/_doc") \
+            .config("spark.es.mapping.id", "row_id") \
+            .config("spark.es.write.operation", "upsert") \
             .config("spark.executor.instances", "1") \
             .config("spark.executor.cores", "2") \
             .config("spark.executor.memory", "1g") \
