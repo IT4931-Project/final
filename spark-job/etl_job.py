@@ -498,7 +498,7 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
 
             df_with_symbol_for_es.write \
                 .format("org.elasticsearch.spark.sql") \
-                .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol}") \
+                .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol.lower()}") \
                 .mode("overwrite") \
                 .save()
 
