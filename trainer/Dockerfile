@@ -1,17 +1,14 @@
-FROM python:3.9-slim
+FROM python:3.9.18-slim
 
-# Install system dependencies
+# Install system dependencies (removed openjdk, wget, git as they are likely not needed for sklearn)
+# If any Python package in requirements.txt needs build tools, add 'build-essential'
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    openjdk-17-jdk-headless \
-    wget \
-    git \
+    build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV PATH=$JAVA_HOME/bin:$PATH
+# JAVA_HOME not needed if not running a local Spark JVM context for the trainer itself
 
 # Set working directory
 WORKDIR /app

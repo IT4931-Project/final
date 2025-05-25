@@ -16,11 +16,13 @@ import pandas as pd
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 from pyspark.sql import Window
-from pyspark.sql.functions import col, avg, stddev, lag, abs, when, sum as spark_sum
-from pyspark.ml.feature import VectorAssembler, MinMaxScaler
-from pyspark.ml.functions import vector_to_array
+from pyspark.sql.functions import col, avg, stddev, lag, abs, when, sum as spark_sum, lead
+# No longer using Spark ML MinMaxScaler here, will use sklearn if needed on Pandas df.
+# from pyspark.ml.feature import VectorAssembler, MinMaxScaler
+# from pyspark.ml.functions import vector_to_array
 from sklearn.model_selection import train_test_split
-from bigdl.orca.data import SparkXShards
+from sklearn.preprocessing import MinMaxScaler as SklearnMinMaxScaler # For scaling target if needed
+# from bigdl.orca.data import SparkXShards # No longer using Orca
 
 # Cấu hình logging
 logging.basicConfig(
@@ -255,170 +257,164 @@ def add_technical_indicators(spark_df, date_col="date", window_size=3):
     logger.info("Technical indicators added successfully")
     return spark_df
 
-def scale_features(spark_df, feature_cols):
-    """
-    Chuẩn hóa các đặc trưng sử dụng MinMaxScaler
-    
-    Tham số:
-        spark_df: Spark DataFrame
-        feature_cols: Danh sách tên các cột đặc trưng
-        
-    Trả về:
-        Tuple của (DataFrame đã chuẩn hóa, mô hình scaler)
-    """
-    logger.info("Scaling features")
-    
-    # Đảm bảo các cột đặc trưng hợp lệ
-    valid_cols = [col_name for col_name in feature_cols if col_name in spark_df.columns]
-    logger.info(f"Using features: {valid_cols}")
-    
-    # Gộp các đặc trưng thành một vector
-    assembler = VectorAssembler(inputCols=valid_cols, outputCol="features_vec")
-    df_vec = assembler.transform(spark_df)
-    
-    # Chuẩn hóa các đặc trưng
-    scaler = MinMaxScaler(inputCol="features_vec", outputCol="scaled_features")
-    df_clean = df_vec.dropna()
-    scaler_model = scaler.fit(df_clean)
-    df_scaled = scaler_model.transform(df_clean)
-    
-    # Chuyển đổi vector thành mảng để dễ sử dụng
-    df_array = df_scaled.withColumn("features_array", vector_to_array("scaled_features"))
-    
-    # Sắp xếp theo ngày
-    if "date" in df_array.columns:
-        df_array = df_array.orderBy("date")
-    elif "year" in df_array.columns and "month" in df_array.columns:
-        df_array = df_array.orderBy(["year", "month"])
-    
-    logger.info(f"Scaled {df_array.count()} rows of data")
-    return df_array, scaler_model
+# def scale_features(spark_df, feature_cols): # This Spark ML scaling is no longer primary
+#     ... (previous implementation) ...
+# We will use the 'scaled_features' array from ETL or apply sklearn scaling on Pandas DF.
 
-def prepare_sequences(df_pandas, seq_length=SEQUENCE_LENGTH, future_days=FUTURE_DAYS):
+def create_ml_features_target(df_pandas, feature_col_name='scaled_features', target_col_name='close', seq_length=SEQUENCE_LENGTH, future_days=FUTURE_DAYS):
     """
-    Chuẩn bị các chuỗi cho việc huấn luyện mô hình LSTM
-    
-    Tham số:
-        df_pandas: Pandas DataFrame với các đặc trưng đã chuẩn hóa
-        seq_length: Chiều dài chuỗi (khoảng thời gian nhìn lại)
-        future_days: Số ngày trong tương lai cần dự đoán
-        
-    Trả về:
-        Tuple của các mảng (X, y)
+    Prepares features (X) and target (y) for traditional ML models.
+    Each sample in X is a flattened sequence of past 'feature_col_name' values.
+    The target y is the 'target_col_name' 'future_days' ahead.
+
+    Args:
+        df_pandas (pd.DataFrame): Input DataFrame with a column containing feature arrays (e.g., 'scaled_features')
+                                 and a column for the target (e.g., 'close'). Must be sorted by date.
+        feature_col_name (str): Name of the column containing the array of features for each day.
+        target_col_name (str): Name of the column to use for the target variable.
+        seq_length (int): Number of past days' features to use for each input sample.
+        future_days (int): How many days into the future to predict the target.
+
+    Returns:
+        Tuple of (np.ndarray, np.ndarray, Optional[SklearnMinMaxScaler]): X_flat, y, target_scaler
+        X_flat: 2D array where each row is a flattened sequence of features.
+        y: 1D array of target values.
+        target_scaler: Scaler used for the target variable (if scaled), None otherwise.
     """
-    logger.info(f"Preparing sequences with length {seq_length} and predicting {future_days} days ahead")
+    logger.info(f"Creating ML features: using '{feature_col_name}' for input, '{target_col_name}' for target, sequence length {seq_length}, predicting {future_days} days ahead.")
+
+    if feature_col_name not in df_pandas.columns:
+        logger.error(f"Feature column '{feature_col_name}' not found in DataFrame.")
+        return np.array([]), np.array([]), None
+    if target_col_name not in df_pandas.columns:
+        logger.error(f"Target column '{target_col_name}' not found in DataFrame.")
+        return np.array([]), np.array([]), None
+
+    # Ensure 'date' column exists for future target calculation if needed, though not directly used for X,y creation from pre-windowed data
+    if 'date' not in df_pandas.columns:
+        logger.warning("'date' column not found. Target shifting relies on row order.")
+
+    # Convert feature column (expected to be list/array of features) to a 2D numpy array
+    # This assumes 'scaled_features' from ETL is already an array of numbers.
+    # If it's a list of lists, np.array() handles it. If it's a column of pd.Series, .tolist() then np.array().
+    try:
+        # Check if elements are already lists/arrays
+        if isinstance(df_pandas[feature_col_name].iloc[0], (list, np.ndarray)):
+            features_matrix = np.array(df_pandas[feature_col_name].tolist())
+        else:
+            # This case should ideally not happen if 'scaled_features' is an array from ETL
+            logger.error(f"'{feature_col_name}' is not in the expected array/list format. Each element should be a list/array of features.")
+            return np.array([]), np.array([]), None
+    except Exception as e:
+        logger.error(f"Error processing feature column '{feature_col_name}': {e}")
+        return np.array([]), np.array([]), None
+
+    # Target variable: price 'future_days' from the *end* of the sequence
+    # df_pandas[target_col_name] gives the actual prices. We might want to scale this too.
+    # For simplicity, let's predict the actual close price first.
+    # We shift the target column to align: y_i corresponds to X_i (features up to day t) predicting price at day t + future_days
+    df_pandas['y_target'] = df_pandas[target_col_name].shift(-future_days)
     
-    # Trích xuất các đặc trưng đã chuẩn hóa
-    features = np.array(df_pandas["features_array"].tolist())
-    
-    # Tạo các chuỗi
-    X = []
-    y = []
-    
-    for i in range(len(df_pandas) - seq_length - future_days + 1):
-        # Chuỗi đầu vào
-        X.append(features[i:i+seq_length])
+    X_list = []
+    y_list = []
+
+    # Iterate to create sequences for X and corresponding y
+    # We need `seq_length` days for features, and the target is `future_days` after the *last* day of the sequence.
+    # So, the last possible `i` is `len(df_pandas) - seq_length - future_days`.
+    # However, since 'y_target' is already shifted, the last `i` for which `y_target` is not NaN
+    # and we have enough preceding data for X is `len(df_pandas) - seq_length`.
+    # The loop should go up to `len(df_pandas) - seq_length`.
+    # The target `y_target.iloc[i + seq_length -1]` corresponds to features ending at `i + seq_length -1`.
+
+    for i in range(len(features_matrix) - seq_length + 1):
+        # Window for features: from i to i + seq_length -1
+        sequence_features = features_matrix[i : i + seq_length]
         
-        # Chuỗi mục tiêu (giá đóng cửa của future_days ngày tiếp theo)
-        # Chúng ta cần trích xuất giá từ vector đặc trưng
-        # Giả định giá đóng cửa ở vị trí 3 trong vector đặc trưng
-        close_idx = 3  # Typically the 4th value in OHLCV data
-        future_prices = [features[i+seq_length+j][close_idx] for j in range(future_days)]
-        y.append(future_prices)
+        # Target: y_target at the end of the input sequence window
+        # This y_target is already the price 'future_days' ahead of that point.
+        current_target_y = df_pandas['y_target'].iloc[i + seq_length - 1]
+
+        if pd.isna(current_target_y): # Skip if target is NaN (due to shift at the end of series)
+            continue
+
+        X_list.append(sequence_features.flatten()) # Flatten the sequence of feature vectors
+        y_list.append(current_target_y)
+
+    if not X_list: # If no sequences could be formed
+        logger.warning("No sequences could be formed with the given parameters.")
+        return np.array([]), np.array([]), None
+
+    X_flat = np.array(X_list)
+    y_array = np.array(y_list)
     
-    X = np.array(X)
-    y = np.array(y)
+    # Optional: Scale the target variable (y)
+    target_scaler = SklearnMinMaxScaler(feature_range=(0, 1))
+    y_scaled = target_scaler.fit_transform(y_array.reshape(-1, 1)).flatten()
     
-    # Reshape y để phù hợp với định dạng đầu ra của mô hình
-    y = np.reshape(y, (y.shape[0], y.shape[1], 1))
-    
-    logger.info(f"Created {len(X)} sequences")
-    return X, y
+    logger.info(f"Created {len(X_flat)} flat feature samples for ML. X_flat shape: {X_flat.shape}, y_scaled shape: {y_scaled.shape}")
+    return X_flat, y_scaled, target_scaler
+
 
 def prepare_data_for_training(symbol, train_ratio=TRAIN_TEST_SPLIT):
     """
-    Chuẩn bị dữ liệu cho việc huấn luyện phân tán
-    
-    Chức năng của hàm này:
-    1. Tạo phiên Spark phân tán
-    2. Tải dữ liệu cho mã cổ phiếu từ HDFS
-    3. Thêm các chỉ báo kỹ thuật
-    4. Chuẩn hóa các đặc trưng
-    5. Chuẩn bị các chuỗi cho LSTM
-    6. Chia dữ liệu thành tập huấn luyện và tập kiểm định
-    7. Tạo SparkXShards cho BigDL Orca phân tán
-    
-    Tham số:
-        symbol: Mã cổ phiếu
-        train_ratio: Tỷ lệ chia tập huấn luyện/kiểm thử
-        
-    Trả về:
-        Tuple của (train_shards, val_shards, feature_count, scaler)
+    Prepares data for traditional Machine Learning model training.
     """
     try:
-        # Tạo phiên Spark phân tán
         spark = create_spark_session()
+        df_spark = load_data_for_symbol(spark, symbol) # Loads 'processed_<symbol>'
+
+        if df_spark is None or df_spark.rdd.isEmpty():
+            logger.error(f"Failed to load processed data for {symbol} or data is empty.")
+            spark.stop()
+            return None, None, None, None, 0, None # X_train, X_val, y_train, y_val, num_features, target_scaler
+
+        # Ensure data is sorted by date before converting to Pandas
+        # The 'scaled_features' column should already be an array from ETL
+        # Required columns: 'date', 'scaled_features' (array of features), 'close' (for target)
+        required_cols = ["date", "scaled_features", "close"]
+        if not all(col_name in df_spark.columns for col_name in required_cols):
+            logger.error(f"Missing one or more required columns ({required_cols}) in DataFrame for symbol {symbol}. Available: {df_spark.columns}")
+            spark.stop()
+            return None, None, None, None, 0, None
+
+        df_spark = df_spark.orderBy("date")
+        df_pandas = df_spark.select(required_cols).toPandas()
+        spark.stop() # Stop Spark session after data is in Pandas
+
+        if df_pandas.empty:
+            logger.error(f"Pandas DataFrame is empty after loading for {symbol}.")
+            return None, None, None, None, 0, None
+
+        # Create flattened features (X) and target (y)
+        # Using 'scaled_features' from ETL as input features, and 'close' as the base for target
+        X_flat, y_scaled, target_scaler = create_ml_features_target(
+            df_pandas,
+            feature_col_name='scaled_features',
+            target_col_name='close',
+            seq_length=SEQUENCE_LENGTH,
+            future_days=FUTURE_DAYS
+        )
+
+        if X_flat.shape[0] == 0:
+            logger.error(f"No training samples generated for {symbol}.")
+            return None, None, None, None, 0, None
+            
+        num_features = X_flat.shape[1] # Number of features in the flattened vector
+
+        # Split data
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_flat, y_scaled, test_size=1 - train_ratio, shuffle=False # Time series data, so no shuffle
+        )
         
-        # Tải dữ liệu (MongoDB first, then local backup)
-        df = load_data_for_symbol(spark, symbol)
-        if df is None:
-            logger.error(f"Failed to load data for {symbol}")
-            return None, None, 0, None
-        
-        # Cache dataframe để tăng tốc xử lý
-        df.cache()
-        
-        # Thêm các chỉ báo kỹ thuật
-        df = add_technical_indicators(df)
-        
-        # Định nghĩa các cột đặc trưng
-        feature_cols = [
-            "open", "high", "low", "close", "volume",
-            f"SMA_3", f"STD_3", "BB_upper", "BB_lower", f"ATR_3", "OBV"
-        ]
-        
-        # Thêm bất kỳ chỉ báo kinh tế bổ sung nào nếu có sẵn
-        economic_indicators = ["unemployment_rate", "gold_price", "fed_funds_rate"]
-        for indicator in economic_indicators:
-            if indicator in df.columns:
-                feature_cols.append(indicator)
-        
-        # Chuẩn hóa các đặc trưng
-        df_scaled, scaler_model = scale_features(df, feature_cols)
-        
-        # Release memory của df gốc
-        df.unpersist()
-        
-        # Cache DataFrame để tăng tốc độ xử lý
-        df_scaled.cache()
-        
-        # Chuyển đổi sang Pandas để chuẩn bị chuỗi
-        # Lưu ý: có thể dùng Spark ML để làm việc này trong phiên bản distributed hoàn toàn
-        # nhưng hiện tại BigDL Orca cần input là numpy arrays
-        df_pandas = df_scaled.toPandas()
-        
-        # Release memory của Spark DataFrame
-        df_scaled.unpersist()
-        
-        # Chuẩn bị các chuỗi
-        X, y = prepare_sequences(df_pandas)
-        
-        # Lấy số lượng đặc trưng
-        feature_count = X.shape[2]
-        
-        # Chia thành tập huấn luyện và tập kiểm định
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=1-train_ratio, shuffle=False)
-        
-        logger.info(f"Split data into {len(X_train)} training and {len(X_val)} validation samples")
-        
-        # Tạo SparkXShards cho BigDL Orca phân tán training
-        # Chú ý: Đặt num_partitions để phân tán dữ liệu đều trên các worker
-        train_shards = SparkXShards.from_numpy((X_train, y_train), num_partitions=NUM_PARTITIONS)
-        val_shards = SparkXShards.from_numpy((X_val, y_val), num_partitions=max(1, NUM_PARTITIONS // 4))
-        
-        logger.info(f"Created distributed data shards: {train_shards.num_partitions()} training partitions and {val_shards.num_partitions()} validation partitions")
-        return train_shards, val_shards, feature_count, scaler_model
-    
+        logger.info(f"Data for {symbol} prepared: X_train shape {X_train.shape}, y_train shape {y_train.shape}, X_val shape {X_val.shape}, y_val shape {y_val.shape}")
+        return X_train, X_val, y_train, y_val, num_features, target_scaler
+
     except Exception as e:
-        logger.error(f"Error preparing data: {str(e)}")
-        return None, None, 0, None
+        logger.error(f"Error preparing data for ML training for symbol {symbol}: {e}", exc_info=True)
+        # Ensure Spark context is stopped in case of error
+        try:
+            if 'spark' in locals() and spark._sc._jsc is not None : # Check if spark session exists and is active
+                spark.stop()
+        except Exception as e_spark_stop:
+            logger.error(f"Error stopping spark session during exception handling: {e_spark_stop}")
+        return None, None, None, None, 0, None
