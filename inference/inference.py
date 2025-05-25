@@ -48,7 +48,7 @@ HDFS_MODEL_PATH = os.getenv('HDFS_MODEL_PATH', '/user/finance/models')
 USE_HDFS = os.getenv('USE_HDFS', 'true').lower() == 'true'
 
 # MongoDB Sharded Cluster Configuration
-MONGO_HOST = os.getenv('MONGO_HOST', 'mongo-router')
+MONGO_HOST = os.getenv('MONGO_HOST', 'mongodb')
 MONGO_PORT = int(os.getenv('MONGO_PORT', 27017))
 MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'finance_data')
 MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
