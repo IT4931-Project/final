@@ -361,29 +361,40 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
 
         logger.info(f"Writing processed data for {symbol} to MongoDB collection: {processed_collection_name}")
         
-        df_to_write = df
-        # If 'scaled_features' (vector) exists and is preferred over raw 'features' (vector), drop 'features'.
-        if "features" in df_to_write.columns and "scaled_features" in df_to_write.columns:
-             df_to_write = df_to_write.drop("features")
+        df_to_write = df.alias("df_to_write_initial") # Alias for clarity
 
-        # Convert VectorUDT columns to ArrayType for MongoDB compatibility
+        # Priority is to use 'scaled_features' if it exists. If so, drop 'features'.
+        # Then, convert the chosen vector column to an array.
+
+        vector_column_to_convert = None
         if "scaled_features" in df_to_write.columns:
-            # Check if the column is actually a vector type before trying to convert
             is_vector = any(field.dataType.typeName() == 'vector' for field in df_to_write.schema.fields if field.name == "scaled_features")
             if is_vector:
-                logger.info("Converting 'scaled_features' (VectorUDT) to ArrayType for MongoDB.")
-                df_to_write = df_to_write.withColumn("scaled_features_array", vector_to_array(col("scaled_features"))).drop("scaled_features").withColumnRenamed("scaled_features_array", "scaled_features")
+                vector_column_to_convert = "scaled_features"
+                if "features" in df_to_write.columns:
+                    logger.info("Dropping 'features' column as 'scaled_features' will be used.")
+                    df_to_write = df_to_write.drop("features")
             else:
-                logger.info("'scaled_features' column is not VectorUDT, no conversion needed.")
-        
-        # Similarly, handle 'features' column if it wasn't dropped and needs conversion (though it should be dropped if scaled_features exists)
-        if "features" in df_to_write.columns:
+                logger.info("'scaled_features' column exists but is not VectorUDT.")
+        elif "features" in df_to_write.columns: # Only consider 'features' if 'scaled_features' is not present or not a vector
             is_vector = any(field.dataType.typeName() == 'vector' for field in df_to_write.schema.fields if field.name == "features")
             if is_vector:
-                logger.info("Converting 'features' (VectorUDT) to ArrayType for MongoDB.")
-                df_to_write = df_to_write.withColumn("features_array", vector_to_array(col("features"))).drop("features").withColumnRenamed("features_array", "features")
+                vector_column_to_convert = "features"
             else:
-                logger.info("'features' column is not VectorUDT, no conversion needed.")
+                logger.info("'features' column exists but is not VectorUDT.")
+
+        if vector_column_to_convert:
+            logger.info(f"Converting '{vector_column_to_convert}' (VectorUDT) to ArrayType for MongoDB.")
+            # Ensure the original vector column is dropped and the new array column gets the original name
+            df_to_write = df_to_write.withColumn(
+                f"{vector_column_to_convert}_array",
+                vector_to_array(col(vector_column_to_convert))
+            ).drop(vector_column_to_convert).withColumnRenamed(f"{vector_column_to_convert}_array", vector_column_to_convert)
+        else:
+            logger.info("No VectorUDT column found named 'scaled_features' or 'features' to convert.")
+
+        logger.info(f"Schema of DataFrame being written to MongoDB for {symbol}:")
+        df_to_write.printSchema()
 
         # Write the data to MongoDB
         df_to_write.write \
