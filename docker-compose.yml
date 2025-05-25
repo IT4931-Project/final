@@ -188,6 +188,12 @@ services:
       - "9300:9300"                            # Transport port
     networks:
       - finance_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     restart: unless-stopped
 
   # Kibana
