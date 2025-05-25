@@ -20,14 +20,16 @@ logging.basicConfig(
 logger = logging.getLogger("dashboard_import")
 
 # Load environment variables
-load_dotenv()
+# Explicitly load .env from /app/.env and override existing env vars
+# This requires .env to be copied to /app/.env in the Dockerfile
+load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Configuration
 ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'elasticsearch-master')
 ELASTICSEARCH_PORT = int(os.getenv('ELASTICSEARCH_PORT', 9200))
 ELASTICSEARCH_USERNAME = os.getenv('ELASTICSEARCH_USERNAME', 'elastic')
-ELASTICSEARCH_PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD', 'changeme')
-KIBANA_HOST = os.getenv('KIBANA_HOST', 'kibana')
+ELASTICSEARCH_PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD', 'devpassword123') # Updated fallback
+KIBANA_HOST = os.getenv('KIBANA_HOST', 'kibana') # Kibana host often matches the service name
 KIBANA_PORT = int(os.getenv('KIBANA_PORT', 5601))
 
 def wait_for_kibana():

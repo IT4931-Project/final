@@ -18,7 +18,7 @@ RUN pip3 install pymongo dnspython
 RUN mkdir -p /scripts
 
 # Copy Python initialization script
-COPY mongo_init.py /scripts/mongo_init.py
+COPY ./mongo-setup/mongo_init.py /scripts/mongo_init.py
 
 # Set execution permissions
 RUN chmod +x /scripts/mongo_init.py

@@ -38,8 +38,8 @@ ENV PYSPARK_PYTHON=python3
 ENV PYSPARK_DRIVER_PYTHON=python3
 
 # Copy configuration files
-COPY spark-defaults.conf ${SPARK_HOME}/conf/
-COPY spark-env.sh ${SPARK_HOME}/conf/
+COPY ./docker/spark-defaults.conf ${SPARK_HOME}/conf/
+COPY ./docker/spark-env.sh ${SPARK_HOME}/conf/
 
 # Create app directory
 RUN mkdir -p /app/data /app/logs
@@ -56,7 +56,7 @@ RUN pip install --no-cache-dir pyspark==${SPARK_VERSION} \
 WORKDIR /app
 
 # Copy entrypoint script
-COPY entrypoint-spark.sh /
+COPY ./docker/entrypoint-spark.sh /
 RUN chmod +x /entrypoint-spark.sh
 
 # Expose Spark ports

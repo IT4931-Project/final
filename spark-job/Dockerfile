@@ -16,15 +16,15 @@ ENV PATH=$JAVA_HOME/bin:$PATH
 WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY ./spark-job/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy the .env file from the project root (one level up from the Dockerfile's context)
+# Copy the .env file from the project root (which is now the build context)
 # to /app/.env in the container.
-COPY ../.env /app/.env
+COPY .env /app/.env
 
-# Copy source code
-COPY . .
+# Copy source code from the spark-job subdirectory
+COPY ./spark-job/ /app/
 
 # Create directories
 RUN mkdir -p /app/data/raw /app/data/processed /app/logs

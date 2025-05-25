@@ -12,15 +12,15 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY ./kafka-consumer/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy the .env file from the project root (one level up from the Dockerfile's context)
+# Copy the .env file from the project root (which is now the build context)
 # to /app/.env in the container.
-COPY ../.env /app/.env
+COPY .env /app/.env
 
-# Copy the application code
-COPY . .
+# Copy the application code from the kafka-consumer subdirectory
+COPY ./kafka-consumer/ /app/
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/data

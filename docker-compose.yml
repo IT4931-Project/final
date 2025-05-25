@@ -28,7 +28,8 @@ services:
   # MongoDB setup service (simplified for single instance)
   mongo-setup:
     build:
-      context: ./mongo-setup
+      context: .
+      dockerfile: ./mongo-setup/Dockerfile
     container_name: finance_mongo_setup
     hostname: mongo-setup
     networks:
@@ -95,8 +96,8 @@ services:
   # Spark Master
   spark-master:
     build:
-      context: ./docker
-      dockerfile: spark.Dockerfile
+      context: .
+      dockerfile: ./docker/spark.Dockerfile
     container_name: finance_spark_master
     environment:
       - SPARK_MODE=master
@@ -118,8 +119,8 @@ services:
   # Spark Worker 1
   spark-worker1:
     build:
-      context: ./docker
-      dockerfile: spark.Dockerfile
+      context: .
+      dockerfile: ./docker/spark.Dockerfile
     container_name: finance_spark_worker1
     environment:
       - SPARK_MODE=worker
@@ -184,8 +185,8 @@ services:
   # Crawler Service
   crawler:
     build:
-      context: ./crawler
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./crawler/Dockerfile
     container_name: finance_crawler
     volumes:
       - ./logs:/app/logs
@@ -201,8 +202,8 @@ services:
   # Kafka Consumer Service
   kafka-consumer:
     build:
-      context: ./kafka-consumer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./kafka-consumer/Dockerfile
     container_name: finance_kafka_consumer
     volumes:
       - ./data:/app/data
@@ -218,8 +219,8 @@ services:
   # ETL Service
   etl:
     build:
-      context: ./spark-job
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./spark-job/Dockerfile
     container_name: finance_etl
     volumes:
       - ./data:/app/data
@@ -241,8 +242,8 @@ services:
   # Model Training Service
   trainer:
     build:
-      context: ./trainer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./trainer/Dockerfile
     container_name: finance_trainer
     volumes:
       - ./data:/app/data
@@ -264,8 +265,8 @@ services:
   # Model Inference Service
   inference:
     build:
-      context: ./inference
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./inference/Dockerfile
     container_name: finance_inference
     volumes:
       - ./data:/app/data
@@ -285,8 +286,8 @@ services:
   # Scheduler Service
   scheduler:
     build:
-      context: ./docker
-      dockerfile: scheduler.Dockerfile
+      context: .
+      dockerfile: ./docker/scheduler.Dockerfile
     container_name: finance_scheduler
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

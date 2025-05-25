@@ -25,12 +25,16 @@ RUN mkdir -p /app /app/logs /app/data
 WORKDIR /app
 
 # Copy requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY ./docker/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy the scheduler script
-COPY scheduler.py /app/
-COPY entrypoint-scheduler.sh /app/
+# Copy the .env file from the project root (which is now the build context)
+# to /app/.env in the container.
+COPY .env /app/.env
+
+# Copy the scheduler script and entrypoint
+COPY ./docker/scheduler.py /app/
+COPY ./docker/entrypoint-scheduler.sh /app/
 
 # Make the entrypoint script executable
 RUN chmod +x /app/entrypoint-scheduler.sh

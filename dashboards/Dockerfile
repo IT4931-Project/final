@@ -6,12 +6,16 @@ WORKDIR /app
 RUN mkdir -p /app/logs
 
 # Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY ./dashboards/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy dashboard files
-COPY *.py /app/
-COPY *.ndjson /app/
+# Copy the .env file from the project root (which will be the build context)
+# to /app/.env in the container.
+COPY .env /app/.env
+
+# Copy dashboard files from the dashboards subdirectory
+COPY ./dashboards/*.py /app/
+COPY ./dashboards/*.ndjson /app/
 
 # Set up entrypoint
 ENTRYPOINT ["python", "dashboard_import.py"]
