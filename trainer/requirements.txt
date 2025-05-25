@@ -8,7 +8,7 @@ scikit-learn==1.2.2
 pyarrow==12.0.0
 fastparquet==2023.4.0
 python-dotenv==1.0.0
-bigdl-orca==2.2.0
+bigdl-orca
 torch==2.0.0
 h5py==3.11.0
 tqdm==4.65.0
