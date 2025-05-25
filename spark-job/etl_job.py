@@ -20,10 +20,12 @@ from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as
 from pyspark.sql.window import Window
 from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType
 from pyspark.ml.feature import StandardScaler, VectorAssembler
-from pyspark.ml.functions import vector_to_array # Import vector_to_array
+from pyspark.ml.functions import vector_to_array
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
+import pymongo # For listing collections
+import re # For regex matching collection names
 
 # Setup logging
 logging.basicConfig(
@@ -54,8 +56,58 @@ SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
 # Default NUM_PARTITIONS to a reasonable value if not set, e.g., 4
 NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '4'))
 
-# Stock symbols to process (should match what the crawler collects)
-SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')
+# Stock symbols to process (this will be overridden by dynamic discovery)
+# SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')
+
+def get_symbols_from_mongodb_collections():
+    """
+    Connects to MongoDB and lists collections matching the 'stock_<SYMBOL>' pattern
+    to dynamically discover symbols to process.
+    """
+    symbols = []
+    try:
+        logger.info("Attempting to connect to MongoDB to discover stock symbols...")
+        mongo_uri = f"mongodb://{MONGO_USERNAME}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}"
+        client = pymongo.MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        db = client[MONGO_DATABASE]
+        
+        # Test connection
+        client.admin.command('ping')
+        logger.info(f"Successfully connected to MongoDB: {MONGO_HOST} for symbol discovery.")
+
+        collection_names = db.list_collection_names()
+        logger.info(f"Found collections: {collection_names}")
+
+        # Regex to match 'stock_SYMBOL' and capture SYMBOL part
+        # Assumes symbols are uppercase letters and do not contain underscores.
+        # Adjust regex if symbol naming convention is different.
+        pattern = re.compile(r"^stock_([A-Z.]+)$")
+        
+        for name in collection_names:
+            match = pattern.match(name)
+            if match:
+                symbol = match.group(1)
+                symbols.append(symbol)
+        
+        if symbols:
+            logger.info(f"Dynamically discovered symbols from MongoDB: {symbols}")
+        else:
+            logger.warning("No 'stock_<SYMBOL>' collections found in MongoDB. ETL will have no symbols to process dynamically.")
+            # Fallback to environment variable if no dynamic symbols found, or keep it empty
+            env_symbols_str = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA')
+            symbols = [s.strip() for s in env_symbols_str.split(',') if s.strip()]
+            logger.info(f"Falling back to STOCK_SYMBOLS from env/default: {symbols}")
+
+        client.close()
+    except Exception as e:
+        logger.error(f"Error discovering symbols from MongoDB: {e}")
+        logger.warning("Falling back to default symbols due to MongoDB connection/discovery error.")
+        # Fallback to environment variable or a hardcoded default list in case of error
+        env_symbols_str = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA')
+        symbols = [s.strip() for s in env_symbols_str.split(',') if s.strip()]
+        logger.info(f"Using fallback symbols: {symbols}")
+    
+    return list(set(symbols)) # Return unique symbols
 
 def create_spark_session():
     """
@@ -484,13 +536,23 @@ def main():
     # Create Spark session
     spark = create_spark_session()
     
-    # Process symbols in parallel
-    # Process symbols sequentially on the driver
+    # Dynamically discover symbols from MongoDB collections
+    discovered_symbols = get_symbols_from_mongodb_collections()
+
+    if not discovered_symbols:
+        logger.error("No symbols to process (neither discovered dynamically nor from fallback). Exiting ETL job.")
+        spark.stop()
+        logger.info("Distributed Spark session stopped.")
+        return
+
+    logger.info(f"ETL job will process the following symbols: {discovered_symbols}")
+    
     results = []
-    for symbol in SYMBOLS:
-        logger.info(f"Initiating processing for symbol: {symbol.strip()}")
-        success = process_symbol(spark, symbol.strip())
-        results.append((symbol.strip(), success))
+    for symbol in discovered_symbols:
+        # Symbol from discovery should already be stripped and valid
+        logger.info(f"Initiating processing for symbol: {symbol}")
+        success = process_symbol(spark, symbol)
+        results.append((symbol, success))
     
     # Count successes
     success_count = sum(1 for _, success in results if success)
@@ -500,7 +562,7 @@ def main():
         logger.info(f"Symbol {symbol}: {'Success' if success else 'Failed'}")
     
     # Log summary
-    logger.info(f"Distributed ETL job completed. Successfully processed {success_count}/{len(SYMBOLS)} symbols")
+    logger.info(f"Distributed ETL job completed. Successfully processed {success_count}/{len(discovered_symbols)} symbols")
     
     # Stop Spark session
     spark.stop()
