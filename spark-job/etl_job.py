@@ -20,8 +20,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date
 from pyspark.sql.window import Window
 from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType, DateType
-from pyspark.ml.feature import StandardScaler, VectorAssembler
-from pyspark.ml.functions import vector_to_array
+# StandardScaler, VectorAssembler removed as they are no longer used
+from pyspark.ml.functions import vector_to_array # Still used for potential manual vector to array if any other vector col existed
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -403,60 +403,7 @@ def calculate_technical_indicators(df):
         logger.error(f"Error calculating technical indicators: {str(e)}")
         return df  # Return original DataFrame without indicators
 
-def standardize_features(df):
-    """
-    Standardize numeric features to have zero mean and unit variance
-    
-    Args:
-        df (pyspark.sql.DataFrame): Data with technical indicators
-        
-    Returns:
-        pyspark.sql.DataFrame: Data with standardized features
-    """
-    if df is None or df.count() == 0:
-        return None
-    
-    try:
-        logger.info("Standardizing features")
-        
-        # Identify numeric feature columns
-        feature_cols = [
-            "open", "high", "low", "close", "volume",
-            "sma_5", "sma_20", "sma_50", "sma_200",
-            "macd", "signal_line", "macd_histogram",
-            "bb_middle", "bb_upper", "bb_lower", "bb_stddev",
-            "rsi", "obv",
-            "day_change_pct", "week_change_pct", "month_change_pct"
-        ]
-        
-        # Filter only columns that exist in the DataFrame
-        feature_cols = [col_name for col_name in feature_cols if col_name in df.columns]
-        
-        # Assemble features into a vector
-        assembler = VectorAssembler(
-            inputCols=feature_cols,
-            outputCol="features",
-            handleInvalid="skip"
-        )
-        df_assembled = assembler.transform(df)
-        
-        # Standardize the features
-        scaler = StandardScaler(
-            inputCol="features",
-            outputCol="scaled_features",
-            withStd=True,
-            withMean=True
-        )
-        
-        scaler_model = scaler.fit(df_assembled)
-        df_scaled = scaler_model.transform(df_assembled)
-        
-        logger.info("Features standardized")
-        return df_scaled
-        
-    except Exception as e:
-        logger.error(f"Error standardizing features: {str(e)}")
-        return df  # Return original DataFrame without standardization
+# standardize_features function removed as it's no longer needed
 
 def write_processed_data_to_mongo_and_local_backup(df, symbol):
     """
@@ -480,32 +427,11 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
         
         df_to_write = df # Start with the input DataFrame
 
-        # Check for 'scaled_features' column first
-        if "scaled_features" in df_to_write.columns:
-            logger.info("Processing 'scaled_features' column.")
-            # Assume it's VectorUDT if it exists from standardize_features and convert
-            df_to_write = df_to_write.withColumn("scaled_features_temp_array", vector_to_array(col("scaled_features"))) \
-                                     .drop("scaled_features") \
-                                     .withColumnRenamed("scaled_features_temp_array", "scaled_features")
-            logger.info("'scaled_features' column converted to array.")
-            
-            # If 'scaled_features' was processed, drop the raw 'features' column if it also exists
-            if "features" in df_to_write.columns:
-                logger.info("Dropping 'features' column as 'scaled_features' has been processed.")
-                df_to_write = df_to_write.drop("features")
-        
-        # If 'scaled_features' was not present, check for 'features' column
-        elif "features" in df_to_write.columns:
-            logger.info("Processing 'features' column (scaled_features not found).")
-            # Assume it's VectorUDT if it exists and convert
-            df_to_write = df_to_write.withColumn("features_temp_array", vector_to_array(col("features"))) \
-                                     .drop("features") \
-                                     .withColumnRenamed("features_temp_array", "features")
-            logger.info("'features' column converted to array.")
-        else:
-            logger.info("Neither 'scaled_features' nor 'features' vector columns found to convert.")
+        # Removed logic for handling 'scaled_features' and 'features' columns
+        # as standardization step is removed.
+        logger.info("Skipping feature vector conversion as standardization is removed.")
 
-        logger.info(f"Schema of DataFrame being written to MongoDB for {symbol} (after potential conversions):")
+        logger.info(f"Schema of DataFrame being written to MongoDB for {symbol}:")
         df_to_write.printSchema()
 
         # Before writing to MongoDB, we need to partition the data by both symbol and trading_date
@@ -649,17 +575,21 @@ def process_symbol(spark, symbol):
         # Cache the technical dataframe
         tech_df.cache()
         
-        # Standardize features
-        std_df = standardize_features(tech_df)
-        if std_df is None:
-            return False
+        # Standardize features step removed
+        # std_df = standardize_features(tech_df)
+        # if std_df is None:
+        #     return False
         
-        # Release memory from tech_df
-        tech_df.unpersist()
+        # Release memory from tech_df (if it was cached and std_df was to be used)
+        # tech_df.unpersist() # tech_df is now the final df before writing
         
         # Write to MongoDB and local backup
-        success = write_processed_data_to_mongo_and_local_backup(std_df, symbol)
+        # Pass tech_df directly as std_df is no longer created
+        success = write_processed_data_to_mongo_and_local_backup(tech_df, symbol)
         
+        # Unpersist tech_df after writing
+        tech_df.unpersist()
+
         return success
         
     except Exception as e:
