@@ -20,7 +20,6 @@ import concurrent.futures
 from tqdm import tqdm
 import re
 import random
-import backoff
 
 from fetch_utils import (
     fetch_stock_history,
@@ -52,9 +51,9 @@ FETCH_INTERVAL = int(os.getenv('FETCH_INTERVAL', '86400'))  # Default: 24 hours
 # Parallelization settings
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', '10'))  # Default: 10 parallel workers
 
-# API rate limit handling
+# Retry settings
 BACKOFF_MAX_TRIES = int(os.getenv('BACKOFF_MAX_TRIES', '5'))  # Maximum number of retry attempts
-MIN_RETRY_WAIT = float(os.getenv('MIN_RETRY_WAIT', '1.0'))    # Minimum wait time before retry (seconds)
+MIN_RETRY_WAIT = float(os.getenv('MIN_RETRY_WAIT', '1.0'))    # Initial wait time before retry (seconds)
 MAX_RETRY_WAIT = float(os.getenv('MAX_RETRY_WAIT', '60.0'))   # Maximum wait time before retry (seconds)
 
 def delivery_report(err, msg):
@@ -334,16 +333,23 @@ def process_symbol(symbol, producer):
     
     return success
 
-@backoff.on_exception(
-    backoff.expo,
-    Exception,
-    max_tries=BACKOFF_MAX_TRIES,
-    min_value=MIN_RETRY_WAIT,
-    max_value=MAX_RETRY_WAIT
-)
 def process_symbol_with_retry(symbol, producer):
-    """Process a symbol with exponential backoff retry for API rate limits"""
-    return process_symbol(symbol, producer)
+    """Process a symbol with simple retry for API rate limits"""
+    max_tries = BACKOFF_MAX_TRIES
+    retry_wait = MIN_RETRY_WAIT
+    
+    for attempt in range(max_tries):
+        try:
+            return process_symbol(symbol, producer)
+        except Exception as e:
+            if attempt < max_tries - 1:  # Don't sleep on the last attempt
+                logger.warning(f"Attempt {attempt+1}/{max_tries} failed for {symbol}: {str(e)}. Retrying in {retry_wait:.2f}s")
+                time.sleep(retry_wait)
+                # Increase wait time for next attempt, but don't exceed max
+                retry_wait = min(retry_wait * 2, MAX_RETRY_WAIT)
+            else:
+                logger.error(f"All {max_tries} attempts failed for {symbol}: {str(e)}")
+                raise
 
 def process_symbols_parallel(symbols, producer):
     """Process multiple symbols in parallel using a thread pool"""
