@@ -212,7 +212,7 @@ def main():
     run_crawler_job()
     
     # Wait a bit before initial ETL
-    time.sleep(300)  # 5 minute
+    time.sleep(900)  # 15 minute
     run_etl_job()
     
     # Enter the main scheduling loop
