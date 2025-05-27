@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
 
-  # Single MongoDB instance (replacing sharded cluster)
   mongodb:
     image: mongo:5.0
     container_name: finance_mongodb
@@ -25,7 +24,6 @@ services:
       start_period: 40s
     restart: unless-stopped
 
-  # MongoDB setup service (simplified for single instance)
   mongo-setup:
     build:
       context: .
@@ -96,26 +94,26 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 40s # Increased start_period for Kafka
+      start_period: 40s
     restart: unless-stopped
 
   kafka-topic-setup:
     build:
       context: .
-      dockerfile: ./kafka-consumer/Dockerfile # Reuses kafka-consumer's build environment
+      dockerfile: ./kafka-consumer/Dockerfile 
     container_name: finance_kafka_topic_setup
     hostname: kafka-topic-setup
     networks:
       - finance_network
     env_file:
-      - .env # For KAFKA_BOOTSTRAP_SERVERS and topic names
-    command: ["python", "/app/setup_topics.py"] # Assumes setup_topics.py is in /app
+      - .env
+    command: ["python", "/app/setup_topics.py"] 
     depends_on:
       kafka-broker1:
-        condition: service_healthy # Wait for Kafka broker to be healthy
-      zookeeper1: # Also depends on Zookeeper for Kafka to be truly ready
         condition: service_healthy
-    restart: "no" # Run once and exit
+      zookeeper1: 
+        condition: service_healthy
+    restart: "no" 
 
   # Spark Master
   spark-master:
@@ -311,10 +309,5 @@ networks:
     name: ${NETWORK_NAME}
 
 volumes:
-  # MongoDB volume (single instance)
   mongodb_data:
-  
-  
-  # Elasticsearch volumes
-  es_master_data: # Volume for the single Elasticsearch node
-  # es_data1_data, es_data2_data, and es_data3_data were removed with ES cluster simplification
+  es_master_data:

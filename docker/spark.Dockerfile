@@ -41,10 +41,8 @@ ENV PYSPARK_DRIVER_PYTHON=python3
 COPY ./docker/spark-defaults.conf ${SPARK_HOME}/conf/
 COPY ./docker/spark-env.sh ${SPARK_HOME}/conf/
 
-# Create app directory
 RUN mkdir -p /app/data /app/logs
 
-# Install PySpark and other Python packages
 RUN pip install --no-cache-dir pyspark==${SPARK_VERSION} \
     numpy \
     pandas \
@@ -52,15 +50,11 @@ RUN pip install --no-cache-dir pyspark==${SPARK_VERSION} \
     fastparquet \
     python-dotenv
 
-# Set work directory
 WORKDIR /app
 
-# Copy entrypoint script
 COPY ./docker/entrypoint-spark.sh /
 RUN chmod +x /entrypoint-spark.sh
 
-# Expose Spark ports
 EXPOSE 8080 7077 6066 8081
 
-# Start Spark using the entrypoint script
 ENTRYPOINT ["/entrypoint-spark.sh"]

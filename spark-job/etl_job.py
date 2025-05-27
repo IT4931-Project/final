@@ -20,9 +20,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date, concat_ws, date_format, isnan
 from pyspark.sql.window import Window
 from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType, DateType, FloatType
-# StandardScaler, VectorAssembler removed as they are no longer used
 from dotenv import load_dotenv
-import pymongo # For listing collections
+import pymongo
 
 # Setup logging
 logging.basicConfig(
@@ -35,9 +34,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("etl_job")
 
-# Load environment variables
-# Explicitly load .env from /app/.env and override existing env vars
-# This requires .env to be copied to /app/.env in the Dockerfile
 load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Configuration
@@ -49,15 +45,12 @@ MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'devpassword123') # Updated fallbac
 MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin') # Updated fallback
 RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
-# Default NUM_PARTITIONS to a reasonable value if not set, e.g., 4
 NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '4'))
 
 # Elasticsearch Configuration
 ES_NODES = os.getenv('ES_NODES', 'elasticsearch-master') # Service name from docker-compose
 ES_PORT = os.getenv('ES_PORT', '9200')
 ES_INDEX_PREFIX = os.getenv('ES_INDEX_PREFIX', 'processed_stock_data') # Prefix for ES indices
-
-# Stock symbols to process (this will be overridden by dynamic discovery)
 
 def get_symbols_from_mongodb_collections():
     """
@@ -79,8 +72,6 @@ def get_symbols_from_mongodb_collections():
         logger.info(f"Found collections: {collection_names}")
 
         # Regex to match 'stock_SYMBOL' and capture SYMBOL part
-        # Assumes symbols are uppercase letters and do not contain underscores.
-        # Adjust regex if symbol naming convention is different.
         pattern = re.compile(r"^stock_([A-Z.]+)$")
         
         for name in collection_names:
@@ -93,7 +84,6 @@ def get_symbols_from_mongodb_collections():
             logger.info(f"Dynamically discovered symbols from MongoDB: {symbols}")
         else:
             logger.warning("No 'stock_<SYMBOL>' collections found in MongoDB. ETL will have no symbols to process dynamically.")
-            # Fallback to environment variable if no dynamic symbols found, or keep it empty
             env_symbols_str = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA')
             symbols = [s.strip() for s in env_symbols_str.split(',') if s.strip()]
             logger.info(f"Falling back to STOCK_SYMBOLS from env/default: {symbols}")
@@ -102,7 +92,6 @@ def get_symbols_from_mongodb_collections():
     except Exception as e:
         logger.error(f"Error discovering symbols from MongoDB: {e}")
         logger.warning("Falling back to default symbols due to MongoDB connection/discovery error.")
-        # Fallback to environment variable or a hardcoded default list in case of error
         env_symbols_str = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA')
         symbols = [s.strip() for s in env_symbols_str.split(',') if s.strip()]
         logger.info(f"Using fallback symbols: {symbols}")
@@ -231,13 +220,9 @@ def clean_and_prepare_data(df, symbol):
         
         # Print the schema to help with debugging
         
-        # Handle the date field from the raw data
-        # First, check the format of the date field
         if "date" in df.columns:
             # Log a sample of date values for debugging
 
-            # Extract date from the pandas Series string representation if needed
-            # Example format: "Ticker\n   2025-04-25\nName: 0, dtype: datetime64[ns]"
             df = df.withColumn(
                 "trading_date",
                 when(
@@ -306,9 +291,6 @@ def calculate_technical_indicators(df):
     try:
         logger.info("Calculating technical indicators")
         
-        # Define base window partitioned by symbol and ordered by trading_date if available, otherwise by date
-        # This ensures calculations are per symbol if multiple symbols were ever in the DataFrame
-        # and silences the "No Partition Defined" warning.
         if "trading_date" in df.columns:
             base_window = Window.partitionBy("symbol").orderBy("trading_date")
         else:
@@ -361,8 +343,7 @@ def calculate_technical_indicators(df):
                         .when(col("price_change") < 0, -col("volume"))
                         .otherwise(0))
         
-        # We need to calculate running sum, which is tricky in Spark
-        # Using a window function with growing window, partitioned by symbol
+        # this, my man, is tricky as funk
         growing_window_partitioned = base_window.rowsBetween(Window.unboundedPreceding, 0)
         df = df.withColumn("obv", spark_sum("volume_sign").over(growing_window_partitioned))
         
@@ -392,8 +373,8 @@ def calculate_technical_indicators(df):
             "sma_5", "sma_20", "sma_50", "sma_200",
             "ema_12", "ema_26", "macd", "signal_line", "macd_histogram",
             "bb_middle", "bb_stddev", "bb_upper", "bb_lower",
-            "rsi", "avg_gain", "avg_loss", "rs", # Intermediate RSI cols also good to type
-            "obv", "volume_sign", # Intermediate OBV cols
+            "rsi", "avg_gain", "avg_loss", "rs",
+            "obv", "volume_sign",
             "day_change_pct", "prev_5d_close", "week_change_pct",
             "prev_20d_close", "month_change_pct"
         ]
@@ -403,7 +384,6 @@ def calculate_technical_indicators(df):
                 df = df.withColumn(col_name, col(col_name).cast(DoubleType()))
             else:
                 # If an indicator column is missing, add it as null of DoubleType
-                # This ensures schema consistency for Elasticsearch
                 logger.warning(f"Technical indicator column '{col_name}' was missing for symbol {df.select('symbol').first()[0] if 'symbol' in df.columns else 'UNKNOWN'}. Adding as null.")
                 df = df.withColumn(col_name, lit(None).cast(DoubleType()))
         
@@ -412,8 +392,6 @@ def calculate_technical_indicators(df):
         
     except Exception as e:
         logger.error(f"Error calculating technical indicators: {str(e)}")
-        # In case of a major error, try to return a DataFrame with null indicators
-        # to maintain schema, assuming 'df' at this point is the input df
         # This part might need refinement based on where the exception occurs
         try:
             logger.warning(f"Attempting to return DataFrame with null indicators due to error for symbol {df.select('symbol').first()[0] if 'symbol' in df.columns else 'UNKNOWN'}")
@@ -426,10 +404,6 @@ def calculate_technical_indicators(df):
                 "day_change_pct", "prev_5d_close", "week_change_pct",
                 "prev_20d_close", "month_change_pct"
             ]
-            # Ensure 'symbol' column exists if possible, or add it.
-            # This assumes 'df' is the input DataFrame to calculate_technical_indicators
-            # and might not have 'symbol' if called with a generic df.
-            # However, within process_symbol, 'df' passed to calculate_technical_indicators should have 'symbol'.
             
             current_symbol = "UNKNOWN_SYMBOL_ON_ERROR"
             if "symbol" in df.columns:
@@ -445,10 +419,8 @@ def calculate_technical_indicators(df):
             logger.info(f"Returning DataFrame with null/typed indicators for symbol {current_symbol} after error.")
         except Exception as inner_e:
             logger.error(f"Further error when trying to create null indicators for symbol {current_symbol}: {inner_e}")
-            # Fallback to returning the original df if absolutely necessary,
-            # but this might perpetuate schema issues.
             # Ideally, the job for this symbol should fail more gracefully or be skipped.
-        return df # Return DataFrame, hopefully with consistent (even if null) schema
+        return df
 
 
 def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
@@ -471,14 +443,9 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
 
         logger.info(f"Writing processed data for {symbol} to MongoDB collection: {processed_collection_name}")
         
-        df_to_write = df # Start with the input DataFrame
+        df_to_write = df 
 
-
-
-        # Before writing to MongoDB, we need to partition the data by both symbol and trading_date
-        # This ensures we don't overwrite data with the same symbol but different dates
-        
-        # First, check if trading_date column exists
+        # check if trading_date column exists
         if "trading_date" not in df_to_write.columns and "date" in df_to_write.columns:
             # If trading_date doesn't exist but date does, use date as trading_date
             df_to_write = df_to_write.withColumn("trading_date", col("date"))
@@ -494,7 +461,7 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
             # Write using this key for MongoDB
             df_to_write.write \
               .format("mongo") \
-              .mode("overwrite") \
+              .mode("overwrite") \ 
               .option("database", MONGO_DATABASE) \
               .option("collection", processed_collection_name) \
               .save()
@@ -514,23 +481,13 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
         # Write to Elasticsearch
         try:
             logger.info(f"Writing processed data for {symbol} to Elasticsearch index: {ES_INDEX_PREFIX}_{symbol}")
-            # The 'es.resource' in SparkSession is already configured with the symbol placeholder.
-            # Spark will replace {symbol} with the actual symbol value from the DataFrame column.
-            # However, the connector might not automatically pick up the 'symbol' column for dynamic index naming
-            # if it's not explicitly part of the es.resource string during the write operation itself.
-            # A common practice is to set the resource dynamically per write if needed,
-            # or ensure the global config is sufficient.
-            # For simplicity, we rely on the global config and assume 'symbol' column exists.
-            
-            # Ensure the DataFrame has the 'symbol' column for dynamic index name resolution by the connector
-            # if it's not already present (though it should be from clean_and_prepare_data)
             if "symbol" not in df_to_write.columns:
                 df_with_symbol_for_es = df_to_write.withColumn("symbol", lit(symbol))
             else:
                 df_with_symbol_for_es = df_to_write
 
-            # Drop the MongoDB '_id' field before writing to Elasticsearch
-            # as ES uses its own _id metadata field and 'row_id' is mapped to it.
+            # Xóa trường '_id' của MongoDB trước khi ghi vào Elasticsearch
+            # vì ES sử dụng trường _id riêng của nó và 'row_id' sẽ được ánh xạ vào đó.
             if "_id" in df_with_symbol_for_es.columns:
                 df_for_es = df_with_symbol_for_es.drop("_id")
                 logger.info("Dropped MongoDB '_id' column before writing to Elasticsearch.")
@@ -545,12 +502,10 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
 
             # === BEGIN NaN to Null CONVERSION FOR ES ===
             logger.info(f"Converting NaN to null for numeric fields before writing to ES for symbol: {symbol}")
-            # Define the list of columns that might contain NaN and need conversion to null for ES
-            # These should primarily be numeric columns resulting from calculations.
+            # Định nghĩa danh sách các cột có thể chứa giá trị NaN và cần chuyển thành null trước khi ghi vào Elasticsearch
+            # Đây chủ yếu là các cột số được sinh ra từ các phép tính.
             numeric_cols_for_nan_conversion = [
-                # OHLCV columns (ensure they are numeric, handle if they are string 'NaN')
                 "open", "high", "low", "close", "volume",
-                # Technical Indicators
                 "sma_5", "sma_20", "sma_50", "sma_200",
                 "ema_12", "ema_26", "macd", "signal_line", "macd_histogram",
                 "bb_middle", "bb_stddev", "bb_upper", "bb_lower",
@@ -577,8 +532,7 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
                         df_for_es_final = df_for_es_final.withColumn(field_name,
                                                                      when(col(field_name) == "NaN", lit(None).cast(DoubleType()))
                                                                      .otherwise(col(field_name).cast(DoubleType()))) # Attempt cast
-                    # Add other numeric types if necessary (LongType, IntegerType etc.)
-                    # For now, assuming indicators are primarily DoubleType or became String 'NaN'
+                    # Hiện tại, giả định rằng các chỉ báo chủ yếu là DoubleType hoặc đã trở thành chuỗi 'NaN'
             
             logger.info(f"Completed NaN to null conversion for symbol: {symbol}")
             # === END NaN to Null CONVERSION FOR ES ===
@@ -595,9 +549,7 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
 
         except Exception as es_ex:
             logger.error(f"Error writing data to Elasticsearch for {symbol}: {str(es_ex)}")
-            # Optionally, decide if this error should make the overall function fail.
-            # For now, we log the error and let the function return based on Mongo/Parquet success.
-            # To make ES write failure critical, you could re-raise or return False here.
+            # cũng có thể re-raise nếu cần thiết
 
         return True
         
@@ -624,8 +576,6 @@ def process_symbol(spark, symbol):
         if raw_df is None:
             return False
         
-        # Cache the dataframe to speed up processing
-        # This distributes the data across the cluster memory
         raw_df.cache()
         
         # Clean and prepare data
@@ -649,9 +599,6 @@ def process_symbol(spark, symbol):
         
         # Cache the technical dataframe
         tech_df.cache()
-        
-        
-        # Release memory from tech_df (if it was cached and std_df was to be used)
         
         # Write to MongoDB and local backup
         # Pass tech_df directly as std_df is no longer created

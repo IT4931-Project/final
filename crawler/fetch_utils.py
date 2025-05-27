@@ -300,7 +300,7 @@ def get_default_symbols() -> List[str]:
 
 def load_stock_symbols(symbols_file: str = None) -> List[str]:
     """
-    Load stock symbols from Google Drive (symbols_file parameter is kept for backward compatibility but ignored)
+    Load stock symbols from Google Drive
     
     Args:
         symbols_file (str, optional): Deprecated parameter, kept for backward compatibility

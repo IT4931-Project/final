@@ -192,9 +192,6 @@ def setup_schedule():
     crawler_schedule = os.getenv("CRAWLER_SCHEDULE", "*/10 * * * *")
     etl_schedule = os.getenv("ETL_SCHEDULE", "0 */12 * * *")
     
-    # Convert cron expressions to schedule format
-    # For simplicity, we're using direct schedule methods rather than parsing cron
-    
     # Crawler: every 10 minutes
     schedule.every(24).hours.do(run_crawler_job)
     logger.info("Scheduled crawler job: every 10 minutes")
@@ -215,7 +212,7 @@ def main():
     run_crawler_job()
     
     # Wait a bit before initial ETL
-    time.sleep(60)  # 1 minute
+    time.sleep(300)  # 5 minute
     run_etl_job()
     
     # Enter the main scheduling loop

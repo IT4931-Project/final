@@ -19,15 +19,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dashboard_import")
 
-# Load environment variables
-# Explicitly load .env from /app/.env and override existing env vars
-# This requires .env to be copied to /app/.env in the Dockerfile
 load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Configuration
 ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'elasticsearch-master')
 ELASTICSEARCH_PORT = int(os.getenv('ELASTICSEARCH_PORT', 9200))
-# ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD are not needed when security is disabled
 KIBANA_HOST = os.getenv('KIBANA_HOST', 'kibana') # Kibana host often matches the service name
 KIBANA_PORT = int(os.getenv('KIBANA_PORT', 5601))
 
@@ -92,9 +88,6 @@ def main():
         logger.error("Timed out waiting for Kibana")
         return False
     
-    # Import dashboards
-    # Note: If there are no .ndjson files in the dashboards directory,
-    # this function will still run but import nothing, which is acceptable.
     if not import_dashboards():
         logger.error("Failed to import dashboards")
         return False

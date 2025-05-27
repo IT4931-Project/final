@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-MongoDB Single Instance Setup Script
-This script replaces the original sharded cluster setup with a simpler single instance MongoDB setup
-to minimize potential errors.
+MongoDB Instance Setup
+
 """
 
 import os
@@ -27,7 +26,6 @@ MONGO_ROOT_PASSWORD = os.environ.get('MONGO_ROOT_PASSWORD', 'example')
 MAX_RETRY_ATTEMPTS = 30
 RETRY_INTERVAL_SECONDS = 2
 
-# MongoDB connection URL - now using single instance instead of sharded cluster
 MONGO_URL = f"mongodb://{MONGO_ROOT_USERNAME}:{MONGO_ROOT_PASSWORD}@mongodb:27017/?authSource=admin"
 
 def connect_with_retry(mongo_url, max_attempts=MAX_RETRY_ATTEMPTS, interval=RETRY_INTERVAL_SECONDS):

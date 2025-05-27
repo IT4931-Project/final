@@ -26,9 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("kafka_consumer")
 
-# Tải biến môi trường
-# Explicitly load .env from /app/.env and override existing env vars
-# This requires .env to be copied to /app/.env in the Dockerfile
 load_dotenv(dotenv_path='/app/.env', override=True)
 
 # Cấu hình Kafka
