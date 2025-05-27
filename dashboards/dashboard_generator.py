@@ -263,7 +263,7 @@ def create_volume_visualization(symbol="*"):
                             },
                             "y": [{"accessor": 1, "format": {"id": "number"}, "params": {}, "aggType": "sum"}]
                         }
-                    }),
+                    },
                     "aggs": [
                         {
                             "id": "1",
@@ -418,7 +418,7 @@ def create_moving_averages_visualization(symbol="*"):
                         "addTimeMarker": False,
                         "labels": {},
                         "thresholdLine": {"show": False, "value": 10, "width": 1, "style": "full", "color": "#E7664C"}
-                    }),
+                    },
                     "aggs": [
                         {
                             "id": "1",
@@ -562,7 +562,7 @@ def create_rsi_visualization(symbol="*"):
                         "labels": {},
                         "thresholdLine": {"show": True, "value": 70, "width": 1, "style": "dashed", "color": "red"},
                         "thresholdLine2": {"show": True, "value": 30, "width": 1, "style": "dashed", "color": "green"}
-                    }),
+                    },
                     "aggs": [
                         {
                             "id": "1",
@@ -699,7 +699,7 @@ def create_macd_visualization(symbol="*"):
                         "legendPosition": "right",
                         "times": [],
                         "addTimeMarker": False
-                    }),
+                    },
                     "aggs": [
                         {
                             "id": "1",
@@ -865,7 +865,7 @@ def create_economic_indicators_visualization():
                         "addTimeMarker": False,
                         "labels": {},
                         "thresholdLine": {"show": False, "value": 10, "width": 1, "style": "full", "color": "#E7664C"}
-                    }),
+                    },
                     "aggs": [
                         {
                             "id": "1",
@@ -965,7 +965,7 @@ def create_stock_performance_visualization(symbol="*"):
                             "invertColors": False,
                             "style": {"bgFill": "#000", "bgColor": False, "labelColor": False, "subText": "", "fontSize": 60}
                         }
-                    }),
+                    },
                     "aggs": [
                         {
                             "id": "1",
@@ -1064,7 +1064,7 @@ def create_stock_selector():
                         "updateFiltersOnChange": True,
                         "useTimeFilter": True,
                         "pinFilters": False
-                    }),
+                    },
                     "aggs": []
                 }),
                 "uiStateJSON": "{}",
@@ -1119,7 +1119,7 @@ def create_date_range_selector():
                         "updateFiltersOnChange": True,
                         "useTimeFilter": True,
                         "pinFilters": False
-                    }),
+                    },
                     "aggs": []
                 }),
                 "uiStateJSON": "{}",
