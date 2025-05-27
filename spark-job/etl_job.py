@@ -385,11 +385,70 @@ def calculate_technical_indicators(df):
                         .otherwise(lit(0)))
         
         logger.info("Technical indicators calculated")
+
+        # Ensure all technical indicator columns exist and have the correct type (DoubleType)
+        # If an indicator failed to calculate, it will be filled with nulls of DoubleType.
+        indicator_cols = [
+            "sma_5", "sma_20", "sma_50", "sma_200",
+            "ema_12", "ema_26", "macd", "signal_line", "macd_histogram",
+            "bb_middle", "bb_stddev", "bb_upper", "bb_lower",
+            "rsi", "avg_gain", "avg_loss", "rs", # Intermediate RSI cols also good to type
+            "obv", "volume_sign", # Intermediate OBV cols
+            "day_change_pct", "prev_5d_close", "week_change_pct",
+            "prev_20d_close", "month_change_pct"
+        ]
+
+        for col_name in indicator_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast(DoubleType()))
+            else:
+                # If an indicator column is missing, add it as null of DoubleType
+                # This ensures schema consistency for Elasticsearch
+                logger.warning(f"Technical indicator column '{col_name}' was missing for symbol {df.select('symbol').first()[0] if 'symbol' in df.columns else 'UNKNOWN'}. Adding as null.")
+                df = df.withColumn(col_name, lit(None).cast(DoubleType()))
+        
+        logger.info(f"Ensured consistent types for technical indicators for symbol {df.select('symbol').first()[0] if 'symbol' in df.columns else 'UNKNOWN'}")
         return df
         
     except Exception as e:
         logger.error(f"Error calculating technical indicators: {str(e)}")
-        return df  # Return original DataFrame without indicators
+        # In case of a major error, try to return a DataFrame with null indicators
+        # to maintain schema, assuming 'df' at this point is the input df
+        # This part might need refinement based on where the exception occurs
+        try:
+            logger.warning(f"Attempting to return DataFrame with null indicators due to error for symbol {df.select('symbol').first()[0] if 'symbol' in df.columns else 'UNKNOWN'}")
+            indicator_cols = [
+                "sma_5", "sma_20", "sma_50", "sma_200",
+                "ema_12", "ema_26", "macd", "signal_line", "macd_histogram",
+                "bb_middle", "bb_stddev", "bb_upper", "bb_lower",
+                "rsi", "avg_gain", "avg_loss", "rs",
+                "obv", "volume_sign",
+                "day_change_pct", "prev_5d_close", "week_change_pct",
+                "prev_20d_close", "month_change_pct"
+            ]
+            # Ensure 'symbol' column exists if possible, or add it.
+            # This assumes 'df' is the input DataFrame to calculate_technical_indicators
+            # and might not have 'symbol' if called with a generic df.
+            # However, within process_symbol, 'df' passed to calculate_technical_indicators should have 'symbol'.
+            
+            current_symbol = "UNKNOWN_SYMBOL_ON_ERROR"
+            if "symbol" in df.columns:
+                # Attempt to get the symbol if the DataFrame is not empty
+                if df.count() > 0:
+                    current_symbol = df.select("symbol").first()[0]
+
+            for col_name in indicator_cols:
+                if col_name not in df.columns: # Add if missing
+                    df = df.withColumn(col_name, lit(None).cast(DoubleType()))
+                else: # Cast if present
+                    df = df.withColumn(col_name, col(col_name).cast(DoubleType()))
+            logger.info(f"Returning DataFrame with null/typed indicators for symbol {current_symbol} after error.")
+        except Exception as inner_e:
+            logger.error(f"Further error when trying to create null indicators for symbol {current_symbol}: {inner_e}")
+            # Fallback to returning the original df if absolutely necessary,
+            # but this might perpetuate schema issues.
+            # Ideally, the job for this symbol should fail more gracefully or be skipped.
+        return df # Return DataFrame, hopefully with consistent (even if null) schema
 
 
 def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
@@ -480,18 +539,59 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
             
             # Add a unique document ID using both symbol and trading_date if available
             if "trading_date" in df_for_es.columns:
-                df_for_es = df_for_es.withColumn("es_id", 
-                                               concat_ws("_", col("symbol"), 
+                df_for_es = df_for_es.withColumn("es_id",
+                                               concat_ws("_", col("symbol"),
                                                         date_format(col("trading_date"), "yyyy-MM-dd")))
+
+            # === BEGIN NaN to Null CONVERSION FOR ES ===
+            logger.info(f"Converting NaN to null for numeric fields before writing to ES for symbol: {symbol}")
+            # Define the list of columns that might contain NaN and need conversion to null for ES
+            # These should primarily be numeric columns resulting from calculations.
+            numeric_cols_for_nan_conversion = [
+                # OHLCV columns (ensure they are numeric, handle if they are string 'NaN')
+                "open", "high", "low", "close", "volume",
+                # Technical Indicators
+                "sma_5", "sma_20", "sma_50", "sma_200",
+                "ema_12", "ema_26", "macd", "signal_line", "macd_histogram",
+                "bb_middle", "bb_stddev", "bb_upper", "bb_lower",
+                "prev_close", # Used in RSI and other calculations
+                "price_change", "gain", "loss", # Intermediate RSI parts
+                "avg_gain", "avg_loss", "rs", "rsi",
+                "volume_sign", "obv", # Intermediate OBV parts
+                "day_change_pct",
+                "prev_5d_close", "week_change_pct",
+                "prev_20d_close", "month_change_pct"
+            ]
             
-            df_for_es.write \
+            df_for_es_final = df_for_es # Start with the DataFrame prepared so far
+            for field_name in numeric_cols_for_nan_conversion:
+                if field_name in df_for_es_final.columns:
+                    # Check if the column is actually numeric or could be a string 'NaN'
+                    current_type = df_for_es_final.schema[field_name].dataType
+                    if isinstance(current_type, (DoubleType, FloatType)): # Add FloatType for completeness
+                        df_for_es_final = df_for_es_final.withColumn(field_name,
+                                                                     when(isnan(col(field_name)), lit(None).cast(DoubleType()))
+                                                                     .otherwise(col(field_name)))
+                    elif isinstance(current_type, StringType):
+                        # If it's a string, check for 'NaN' string and convert, then cast others to Double
+                        df_for_es_final = df_for_es_final.withColumn(field_name,
+                                                                     when(col(field_name) == "NaN", lit(None).cast(DoubleType()))
+                                                                     .otherwise(col(field_name).cast(DoubleType()))) # Attempt cast
+                    # Add other numeric types if necessary (LongType, IntegerType etc.)
+                    # For now, assuming indicators are primarily DoubleType or became String 'NaN'
+            
+            logger.info(f"Completed NaN to null conversion for symbol: {symbol}")
+            # === END NaN to Null CONVERSION FOR ES ===
+            
+            df_for_es_final.write \
                 .format("org.elasticsearch.spark.sql") \
                 .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol.lower()}") \
-                .option("es.mapping.id", "es_id" if "es_id" in df_for_es.columns else "row_id") \
+                .option("es.mapping.id", "es_id" if "es_id" in df_for_es_final.columns else "row_id") \
+                .option("es.spark.dataframe.write.null", "true") # Explicitly allow nulls
                 .mode("overwrite") \
                 .save()
 
-            logger.info(f"Successfully wrote {df_for_es.count()} records to Elasticsearch index {ES_INDEX_PREFIX}_{symbol.lower()}")
+            logger.info(f"Successfully wrote {df_for_es_final.count()} records to Elasticsearch index {ES_INDEX_PREFIX}_{symbol.lower()}")
 
         except Exception as es_ex:
             logger.error(f"Error writing data to Elasticsearch for {symbol}: {str(es_ex)}")
