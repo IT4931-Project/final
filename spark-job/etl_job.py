@@ -17,7 +17,7 @@ import logging
 import datetime
 import re
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date, concat_ws, date_format
+from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date, concat_ws, date_format, isnan
 from pyspark.sql.window import Window
 from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType, DateType, FloatType
 # StandardScaler, VectorAssembler removed as they are no longer used
