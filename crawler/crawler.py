@@ -153,7 +153,7 @@ def process_historical_data(symbol, producer):
     logger.info(f"Processing historical data for {symbol}")
     
     
-    df = fetch_stock_history(symbol, period="30d")
+    df = fetch_stock_history(symbol, period="max")
     if df is None or df.empty:
         return False
     

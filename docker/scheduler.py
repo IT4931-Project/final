@@ -196,7 +196,7 @@ def setup_schedule():
     # For simplicity, we're using direct schedule methods rather than parsing cron
     
     # Crawler: every 10 minutes
-    schedule.every(10).minutes.do(run_crawler_job)
+    schedule.every(24).hours.do(run_crawler_job)
     logger.info("Scheduled crawler job: every 10 minutes")
     
     # ETL: every 12 hours
