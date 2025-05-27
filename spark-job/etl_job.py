@@ -587,7 +587,7 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
                 .format("org.elasticsearch.spark.sql") \
                 .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol.lower()}") \
                 .option("es.mapping.id", "es_id" if "es_id" in df_for_es_final.columns else "row_id") \
-                .option("es.spark.dataframe.write.null", "true") # Explicitly allow nulls
+                .option("es.spark.dataframe.write.null", "true") \
                 .mode("overwrite") \
                 .save()
 
