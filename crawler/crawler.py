@@ -187,7 +187,7 @@ def process_historical_data(symbol, producer):
                 'high': float(row['High'].iloc[0]) if hasattr(row['High'], 'iloc') else float(row['High']),
                 'low': float(row['Low'].iloc[0]) if hasattr(row['Low'], 'iloc') else float(row['Low']),
                 'close': float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close']),
-                'volume': int(row['Volume'].iloc[0]) if hasattr(row['Volume'], 'iloc') else int(row['Volume']),
+                'volume': (lambda f_val: 0 if f_val != f_val else int(f_val))(float(row['Volume'].iloc[0] if hasattr(row['Volume'], 'iloc') else row['Volume'])),
                 'timestamp': datetime.datetime.now().isoformat()  # Add collection timestamp
             }
             
