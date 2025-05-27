@@ -17,16 +17,12 @@ import logging
 import datetime
 import re
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date
+from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date, concat_ws, date_format
 from pyspark.sql.window import Window
 from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType, DateType
 # StandardScaler, VectorAssembler removed as they are no longer used
-from pyspark.ml.functions import vector_to_array # Still used for potential manual vector to array if any other vector col existed
-import pandas as pd
-import numpy as np
 from dotenv import load_dotenv
 import pymongo # For listing collections
-import re # For regex matching collection names
 
 # Setup logging
 logging.basicConfig(
@@ -52,7 +48,6 @@ MONGO_USERNAME = os.getenv('MONGO_USERNAME', 'admin')
 MONGO_PASSWORD = os.getenv('MONGO_PASSWORD', 'devpassword123') # Updated fallback
 MONGO_AUTH_SOURCE = os.getenv('MONGO_AUTH_SOURCE', 'admin') # Updated fallback
 RAW_DATA_PATH = os.getenv('RAW_DATA_PATH', '/app/data/raw')
-PROCESSED_DATA_LOCAL_BACKUP_PATH = os.getenv('PROCESSED_DATA_LOCAL_BACKUP_PATH', '/app/data/processed_backup')
 SPARK_MASTER = os.getenv('SPARK_MASTER', 'spark://spark-master:7077')
 # Default NUM_PARTITIONS to a reasonable value if not set, e.g., 4
 NUM_PARTITIONS = int(os.getenv('NUM_PARTITIONS', '4'))
@@ -63,7 +58,6 @@ ES_PORT = os.getenv('ES_PORT', '9200')
 ES_INDEX_PREFIX = os.getenv('ES_INDEX_PREFIX', 'processed_stock_data') # Prefix for ES indices
 
 # Stock symbols to process (this will be overridden by dynamic discovery)
-# SYMBOLS = os.getenv('STOCK_SYMBOLS', 'AAPL,MSFT,GOOG,AMZN,TSLA').split(',')
 
 def get_symbols_from_mongodb_collections():
     """
@@ -236,15 +230,11 @@ def clean_and_prepare_data(df, symbol):
             logger.warning(f"Missing columns in dataframe: {missing_cols}")
         
         # Print the schema to help with debugging
-        logger.info(f"Raw data schema for {symbol}:")
-        df.printSchema()
         
         # Handle the date field from the raw data
         # First, check the format of the date field
         if "date" in df.columns:
             # Log a sample of date values for debugging
-            date_samples = df.select("date").limit(5).collect()
-            logger.info(f"Date sample values: {[row.date for row in date_samples]}")
 
             # Extract date from the pandas Series string representation if needed
             # Example format: "Ticker\n   2025-04-25\nName: 0, dtype: datetime64[ns]"
@@ -293,8 +283,6 @@ def clean_and_prepare_data(df, symbol):
         df = df.withColumn("row_id", expr("uuid()"))
         
         logger.info(f"Data cleaning completed for {symbol}")
-        logger.info(f"Cleaned data schema for {symbol}:")
-        df.printSchema()
         
         return df
         
@@ -403,11 +391,10 @@ def calculate_technical_indicators(df):
         logger.error(f"Error calculating technical indicators: {str(e)}")
         return df  # Return original DataFrame without indicators
 
-# standardize_features function removed as it's no longer needed
 
-def write_processed_data_to_mongo_and_local_backup(df, symbol):
+def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
     """
-    Write processed data to MongoDB and create a local Parquet backup.
+    Write processed data to MongoDB and Elasticsearch.
     
     Args:
         df (pyspark.sql.DataFrame): Processed data
@@ -427,12 +414,7 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
         
         df_to_write = df # Start with the input DataFrame
 
-        # Removed logic for handling 'scaled_features' and 'features' columns
-        # as standardization step is removed.
-        logger.info("Skipping feature vector conversion as standardization is removed.")
 
-        logger.info(f"Schema of DataFrame being written to MongoDB for {symbol}:")
-        df_to_write.printSchema()
 
         # Before writing to MongoDB, we need to partition the data by both symbol and trading_date
         # This ensures we don't overwrite data with the same symbol but different dates
@@ -469,13 +451,6 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
         
         logger.info(f"Successfully wrote {df_to_write.count()} records to MongoDB collection {processed_collection_name}")
 
-        # Create a backup in local filesystem (Parquet)
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        local_backup_dir_path = os.path.join(PROCESSED_DATA_LOCAL_BACKUP_PATH, symbol, f"backup_{timestamp}")
-        os.makedirs(local_backup_dir_path, exist_ok=True)
-        
-        df_to_write.coalesce(1).write.mode("overwrite").parquet(local_backup_dir_path)
-        logger.info(f"Successfully created local Parquet backup at {local_backup_dir_path}")
 
         # Write to Elasticsearch
         try:
@@ -575,17 +550,12 @@ def process_symbol(spark, symbol):
         # Cache the technical dataframe
         tech_df.cache()
         
-        # Standardize features step removed
-        # std_df = standardize_features(tech_df)
-        # if std_df is None:
-        #     return False
         
         # Release memory from tech_df (if it was cached and std_df was to be used)
-        # tech_df.unpersist() # tech_df is now the final df before writing
         
         # Write to MongoDB and local backup
         # Pass tech_df directly as std_df is no longer created
-        success = write_processed_data_to_mongo_and_local_backup(tech_df, symbol)
+        success = write_processed_data_to_mongo_and_elasticsearch(tech_df, symbol)
         
         # Unpersist tech_df after writing
         tech_df.unpersist()
