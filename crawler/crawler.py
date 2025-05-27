@@ -183,11 +183,11 @@ def process_historical_data(symbol, producer):
             record = {
                 'ticker': symbol,
                 'date': date_str,
-                'open': float(row['Open']) if hasattr(row['Open'], 'iloc') else float(row['Open']),
-                'high': float(row['High']) if hasattr(row['High'], 'iloc') else float(row['High']),
-                'low': float(row['Low']) if hasattr(row['Low'], 'iloc') else float(row['Low']),
-                'close': float(row['Close']) if hasattr(row['Close'], 'iloc') else float(row['Close']),
-                'volume': int(row['Volume']) if hasattr(row['Volume'], 'iloc') else int(row['Volume']),
+                'open': float(row['Open'].iloc[0]) if hasattr(row['Open'], 'iloc') else float(row['Open']),
+                'high': float(row['High'].iloc[0]) if hasattr(row['High'], 'iloc') else float(row['High']),
+                'low': float(row['Low'].iloc[0]) if hasattr(row['Low'], 'iloc') else float(row['Low']),
+                'close': float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close']),
+                'volume': int(row['Volume'].iloc[0]) if hasattr(row['Volume'], 'iloc') else int(row['Volume']),
                 'timestamp': datetime.datetime.now().isoformat()  # Add collection timestamp
             }
             
