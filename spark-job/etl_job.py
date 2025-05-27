@@ -15,10 +15,11 @@ import sys
 import time
 import logging
 import datetime
+import re
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum
+from pyspark.sql.functions import col, expr, when, lit, lag, avg, stddev, sum as spark_sum, regexp_extract, to_date
 from pyspark.sql.window import Window
-from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType
+from pyspark.sql.types import DoubleType, StringType, TimestampType, ArrayType, DateType
 from pyspark.ml.feature import StandardScaler, VectorAssembler
 from pyspark.ml.functions import vector_to_array
 import pandas as pd
@@ -228,20 +229,61 @@ def clean_and_prepare_data(df, symbol):
     try:
         logger.info(f"Cleaning and preparing data for {symbol}")
         
-        # Convert string dates to proper date type
-        df = df.withColumn("date", col("date").cast("date"))
+        # Check if the dataframe has the required columns
+        required_cols = ["ticker", "date", "open", "high", "low", "close", "volume"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            logger.warning(f"Missing columns in dataframe: {missing_cols}")
+        
+        # Print the schema to help with debugging
+        logger.info(f"Raw data schema for {symbol}:")
+        df.printSchema()
+        
+        # Handle the date field from the raw data
+        # First, check the format of the date field
+        if "date" in df.columns:
+            # Log a sample of date values for debugging
+            date_samples = df.select("date").limit(5).collect()
+            logger.info(f"Date sample values: {[row.date for row in date_samples]}")
+
+            # Extract date from the pandas Series string representation if needed
+            # Example format: "Ticker\n   2025-04-25\nName: 0, dtype: datetime64[ns]"
+            df = df.withColumn(
+                "trading_date",
+                when(
+                    col("date").rlike("\\d{4}-\\d{2}-\\d{2}"),
+                    regexp_extract(col("date"), "(\\d{4}-\\d{2}-\\d{2})", 1)
+                ).otherwise(None)
+            )
+            
+            # Attempt to convert the extracted date to a proper date type
+            df = df.withColumn("trading_date", to_date(col("trading_date"), "yyyy-MM-dd"))
+            
+            # Check if trading_date conversion was successful
+            null_dates = df.filter(col("trading_date").isNull()).count()
+            logger.info(f"Records with null trading_date after extraction: {null_dates}")
+            
+            # If trading_date extraction failed for most records, try using the timestamp as a fallback
+            if null_dates > df.count() * 0.5 and "timestamp" in df.columns:
+                logger.warning("Date extraction failed for most records. Using timestamp as fallback.")
+                df = df.withColumn("trading_date", to_date(col("timestamp")))
         
         # Ensure numeric columns are double type
         numeric_cols = ["open", "high", "low", "close", "volume"]
         for col_name in numeric_cols:
-            df = df.withColumn(col_name, col(col_name).cast(DoubleType()))
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast(DoubleType()))
         
         # Handle missing values
         for col_name in numeric_cols:
-            df = df.filter(col(col_name).isNotNull())
+            if col_name in df.columns:
+                df = df.filter(col(col_name).isNotNull())
         
-        # Sort by date (ascending)
-        df = df.orderBy("date")
+        # Sort by trading_date or date (ascending)
+        if "trading_date" in df.columns:
+            df = df.orderBy("trading_date")
+        elif "date" in df.columns:
+            df = df.orderBy("date")
         
         # Add symbol column if not present
         if "symbol" not in df.columns:
@@ -251,6 +293,9 @@ def clean_and_prepare_data(df, symbol):
         df = df.withColumn("row_id", expr("uuid()"))
         
         logger.info(f"Data cleaning completed for {symbol}")
+        logger.info(f"Cleaned data schema for {symbol}:")
+        df.printSchema()
+        
         return df
         
     except Exception as e:
@@ -273,10 +318,13 @@ def calculate_technical_indicators(df):
     try:
         logger.info("Calculating technical indicators")
         
-        # Define base window partitioned by symbol and ordered by date
+        # Define base window partitioned by symbol and ordered by trading_date if available, otherwise by date
         # This ensures calculations are per symbol if multiple symbols were ever in the DataFrame
         # and silences the "No Partition Defined" warning.
-        base_window = Window.partitionBy("symbol").orderBy("date")
+        if "trading_date" in df.columns:
+            base_window = Window.partitionBy("symbol").orderBy("trading_date")
+        else:
+            base_window = Window.partitionBy("symbol").orderBy("date")
 
         # Define windows for different lookback periods based on the base window
         window_5d = base_window.rowsBetween(-4, 0)
@@ -460,13 +508,38 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
         logger.info(f"Schema of DataFrame being written to MongoDB for {symbol} (after potential conversions):")
         df_to_write.printSchema()
 
-        # Write the data to MongoDB
-        df_to_write.write \
-          .format("mongo") \
-          .mode("overwrite") \
-          .option("database", MONGO_DATABASE) \
-          .option("collection", processed_collection_name) \
-          .save()
+        # Before writing to MongoDB, we need to partition the data by both symbol and trading_date
+        # This ensures we don't overwrite data with the same symbol but different dates
+        
+        # First, check if trading_date column exists
+        if "trading_date" not in df_to_write.columns and "date" in df_to_write.columns:
+            # If trading_date doesn't exist but date does, use date as trading_date
+            df_to_write = df_to_write.withColumn("trading_date", col("date"))
+        
+        # Write the data to MongoDB using a composite key of symbol+trading_date if available
+        if "trading_date" in df_to_write.columns:
+            logger.info(f"Using composite key of symbol+trading_date for MongoDB write")
+            # Create a composite key column
+            df_to_write = df_to_write.withColumn("symbol_date_key", 
+                                              concat_ws("_", col("symbol"), 
+                                                       date_format(col("trading_date"), "yyyy-MM-dd")))
+            
+            # Write using this key for MongoDB
+            df_to_write.write \
+              .format("mongo") \
+              .mode("overwrite") \
+              .option("database", MONGO_DATABASE) \
+              .option("collection", processed_collection_name) \
+              .save()
+        else:
+            # Fallback to the original overwrite method if no trading_date is available
+            logger.warning(f"No trading_date column available, using simple overwrite by symbol")
+            df_to_write.write \
+              .format("mongo") \
+              .mode("overwrite") \
+              .option("database", MONGO_DATABASE) \
+              .option("collection", processed_collection_name) \
+              .save()
         
         logger.info(f"Successfully wrote {df_to_write.count()} records to MongoDB collection {processed_collection_name}")
 
@@ -504,9 +577,16 @@ def write_processed_data_to_mongo_and_local_backup(df, symbol):
             else:
                 df_for_es = df_with_symbol_for_es
             
+            # Add a unique document ID using both symbol and trading_date if available
+            if "trading_date" in df_for_es.columns:
+                df_for_es = df_for_es.withColumn("es_id", 
+                                               concat_ws("_", col("symbol"), 
+                                                        date_format(col("trading_date"), "yyyy-MM-dd")))
+            
             df_for_es.write \
                 .format("org.elasticsearch.spark.sql") \
                 .option("es.resource", f"{ES_INDEX_PREFIX}_{symbol.lower()}") \
+                .option("es.mapping.id", "es_id" if "es_id" in df_for_es.columns else "row_id") \
                 .mode("overwrite") \
                 .save()
 

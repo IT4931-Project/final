@@ -15,6 +15,12 @@ import pandas as pd
 import pytz
 from confluent_kafka import Producer
 import csv
+import uuid
+import concurrent.futures
+from tqdm import tqdm
+import re
+import random
+import backoff
 
 from fetch_utils import (
     fetch_stock_history,
@@ -42,6 +48,14 @@ KAFKA_TOPIC_INFO = os.getenv('KAFKA_TOPIC_INFO', 'stock_info')
 
 # intervals
 FETCH_INTERVAL = int(os.getenv('FETCH_INTERVAL', '86400'))  # Default: 24 hours
+
+# Parallelization settings
+MAX_WORKERS = int(os.getenv('MAX_WORKERS', '10'))  # Default: 10 parallel workers
+
+# API rate limit handling
+BACKOFF_MAX_TRIES = int(os.getenv('BACKOFF_MAX_TRIES', '5'))  # Maximum number of retry attempts
+MIN_RETRY_WAIT = float(os.getenv('MIN_RETRY_WAIT', '1.0'))    # Minimum wait time before retry (seconds)
+MAX_RETRY_WAIT = float(os.getenv('MAX_RETRY_WAIT', '60.0'))   # Maximum wait time before retry (seconds)
 
 def delivery_report(err, msg):
     """callback cho producer để check message status"""
@@ -86,10 +100,59 @@ def save_to_csv(data, symbol, data_type='history'):
         
     except Exception as e:
         logger.error(f"Error saving {data_type} data to CSV/JSON: {e}")
+def format_date(date_value):
+    """
+    Standardize date formatting from various formats to YYYY-MM-DD string
+    
+    Args:
+        date_value: Date in various formats (pd.Timestamp, string, etc.)
+    
+    Returns:
+        str: Formatted date string in YYYY-MM-DD format
+    """
+    try:
+        if date_value is None:
+            return None
+            
+        # Handle pandas Series or DataFrame
+        if isinstance(date_value, pd.Series):
+            # Extract first value if it's a Series
+            if not date_value.empty:
+                date_obj = date_value.iloc[0]
+            else:
+                return None
+        # Handle direct pandas Timestamp
+        elif isinstance(date_value, pd.Timestamp):
+            date_obj = date_value
+        # Handle string with embedded date pattern (from pandas Series string representation)
+        elif isinstance(date_value, str):
+            # Try to extract date pattern YYYY-MM-DD from string
+            date_pattern = re.search(r'(\d{4}-\d{2}-\d{2})', date_value)
+            if date_pattern:
+                return date_pattern.group(1)
+            # If no pattern found, try to parse as date
+            try:
+                date_obj = pd.to_datetime(date_value)
+            except:
+                return date_value
+        else:
+            # Try to convert to pandas timestamp
+            try:
+                date_obj = pd.to_datetime(date_value)
+            except:
+                return str(date_value)
+        
+        # Format as YYYY-MM-DD
+        return date_obj.strftime('%Y-%m-%d')
+    except Exception as e:
+        logger.warning(f"Error formatting date {date_value}: {e}")
+        # Return string representation as fallback
+        return str(date_value)
 
 def process_historical_data(symbol, producer):
     """data processing cho dữ liệu lịch sử"""
     logger.info(f"Processing historical data for {symbol}")
+    
     
     df = fetch_stock_history(symbol, period="30d")
     if df is None or df.empty:
@@ -100,23 +163,33 @@ def process_historical_data(symbol, producer):
     
     # Gửi từng dòng đến Kafka
     count = 0
-    for _, row in df.iterrows():
+    for index, row in df.iterrows():
         # Tạo một bản ghi với các trường cần thiết
         try:
-            # Try to format the date, handle different possible types
-            if hasattr(row['Date'], 'strftime'):
-                date_str = row['Date'].strftime('%Y-%m-%d')
-            else:
-                date_str = str(row['Date'])
+            # Use the format_date utility function
+            date_str = None
+            
+            # Try to get date from 'Date' column first
+            if 'Date' in row:
+                date_str = format_date(row['Date'])
+            
+            # If no date from column, use index
+            if not date_str:
+                date_str = format_date(index)
+            
+            # Fallback to current date if all else fails
+            if not date_str:
+                date_str = datetime.date.today().strftime('%Y-%m-%d')
                 
             record = {
                 'ticker': symbol,
                 'date': date_str,
-                'open': float(row['Open'].iloc[0]) if hasattr(row['Open'], 'iloc') else float(row['Open']),
-                'high': float(row['High'].iloc[0]) if hasattr(row['High'], 'iloc') else float(row['High']),
-                'low': float(row['Low'].iloc[0]) if hasattr(row['Low'], 'iloc') else float(row['Low']),
-                'close': float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close']),
-                'volume': int(row['Volume'].iloc[0]) if hasattr(row['Volume'], 'iloc') else int(row['Volume'])
+                'open': float(row['Open']) if hasattr(row['Open'], 'iloc') else float(row['Open']),
+                'high': float(row['High']) if hasattr(row['High'], 'iloc') else float(row['High']),
+                'low': float(row['Low']) if hasattr(row['Low'], 'iloc') else float(row['Low']),
+                'close': float(row['Close']) if hasattr(row['Close'], 'iloc') else float(row['Close']),
+                'volume': int(row['Volume']) if hasattr(row['Volume'], 'iloc') else int(row['Volume']),
+                'timestamp': datetime.datetime.now().isoformat()  # Add collection timestamp
             }
             
             # Chuyển đổi thành JSON và gửi đến Kafka
@@ -150,13 +223,22 @@ def process_actions_data(symbol, producer):
     
     # Gửi từng dòng đến Kafka
     count = 0
-    for _, row in df.iterrows():
+    for index, row in df.iterrows():
         try:
-            # Try to format the date, handle different possible types
-            if hasattr(row['date'], 'strftime'):
-                date_str = row['date'].strftime('%Y-%m-%d')
-            else:
-                date_str = str(row['date'])
+            # Use the format_date utility function
+            date_str = None
+            
+            # Try to get date from 'date' column first
+            if 'date' in row:
+                date_str = format_date(row['date'])
+            
+            # If no date from column, use index
+            if not date_str:
+                date_str = format_date(index)
+            
+            # Fallback to current date if all else fails
+            if not date_str:
+                date_str = datetime.date.today().strftime('%Y-%m-%d')
                 
             # Tạo một bản ghi với các trường cần thiết
             dividends = 0.0
@@ -178,7 +260,8 @@ def process_actions_data(symbol, producer):
                 'ticker': symbol,
                 'date': date_str,
                 'dividends': dividends,
-                'stock_splits': stock_splits
+                'stock_splits': stock_splits,
+                'timestamp': datetime.datetime.now().isoformat()  # Add collection timestamp
             }
             
             # Chuyển đổi thành JSON và gửi đến Kafka
@@ -209,6 +292,9 @@ def process_company_info(symbol, producer):
     
     # Lưu vào JSON để backup
     save_to_csv(info, symbol, 'info')
+    
+    # Add timestamp to info
+    info['timestamp'] = datetime.datetime.now().isoformat()
     
     # Chuyển đổi thành JSON và gửi đến Kafka
     json_value = json.dumps(info, default=str)
@@ -248,34 +334,81 @@ def process_symbol(symbol, producer):
     
     return success
 
+@backoff.on_exception(
+    backoff.expo,
+    Exception,
+    max_tries=BACKOFF_MAX_TRIES,
+    min_delay=MIN_RETRY_WAIT,
+    max_delay=MAX_RETRY_WAIT
+)
+def process_symbol_with_retry(symbol, producer):
+    """Process a symbol with exponential backoff retry for API rate limits"""
+    return process_symbol(symbol, producer)
+
+def process_symbols_parallel(symbols, producer):
+    """Process multiple symbols in parallel using a thread pool"""
+    logger.info(f"Processing {len(symbols)} symbols in parallel with {MAX_WORKERS} workers")
+    
+    successful_symbols = 0
+    failed_symbols = 0
+    
+    # Shuffle symbols to distribute API load more evenly
+    shuffled_symbols = list(symbols)
+    random.shuffle(shuffled_symbols)
+
+    # Use ThreadPoolExecutor for parallelization
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit all tasks to the executor with retry mechanism
+        future_to_symbol = {
+            executor.submit(process_symbol_with_retry, symbol.strip(), producer): symbol.strip()
+            for symbol in shuffled_symbols if symbol.strip()
+        }
+        
+        # Process results as they complete
+        for future in tqdm(concurrent.futures.as_completed(future_to_symbol), total=len(future_to_symbol), desc="Processing Symbols"):
+            symbol = future_to_symbol[future]
+            try:
+                success = future.result()
+                if success:
+                    logger.info(f"Successfully processed {symbol}")
+                    successful_symbols += 1
+                else:
+                    logger.warning(f"Failed to process {symbol}")
+                    failed_symbols += 1
+            except Exception as e:
+                logger.error(f"Exception while processing {symbol}: {e}")
+                failed_symbols += 1
+    
+    logger.info(f"Parallel processing complete. Success: {successful_symbols}, Failed: {failed_symbols}")
+    return successful_symbols > 0
+
 def main():
-    logger.info("Starting Financial Data Crawler with Kafka streaming")
+    logger.info("Starting Financial Data Crawler with Kafka streaming and parallel processing")
     
     # Tạo Kafka producer
     producer = create_kafka_producer()
     
     while True:
         try:
-            logger.info(f"Starting data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            start_time = datetime.datetime.now()
+            logger.info(f"Starting data collection cycle at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Tải các mã cổ phiếu từ Google Drive
             symbols = load_stock_symbols()
             
-            # Xử lý từng mã cổ phiếu
-            for symbol in symbols:
-                symbol = symbol.strip()
-                success = process_symbol(symbol, producer)
-                if not success:
-                    logger.warning(f"Failed to process symbol {symbol}")
-                
-                # Thêm độ trễ nhỏ giữa các mã cổ phiếu để tránh giới hạn tốc độ
-                time.sleep(2)
+            # Process symbols in parallel
+            success = process_symbols_parallel(symbols, producer)
             
-            logger.info(f"Completed data collection cycle at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            logger.info(f"Waiting {FETCH_INTERVAL} seconds before next cycle...")
+            end_time = datetime.datetime.now()
+            processing_time = (end_time - start_time).total_seconds()
+            logger.info(f"Completed data collection cycle in {processing_time:.2f} seconds at {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Chờ đến chu kỳ tiếp theo
-            time.sleep(FETCH_INTERVAL)
+            # Calculate time until next cycle
+            wait_time = max(1, FETCH_INTERVAL - processing_time)
+            logger.info(f"Waiting {wait_time:.2f} seconds before next cycle...")
+            
+            # Wait until next cycle (with sanity check)
+            time.sleep(wait_time)
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
             # Add a delay before retrying

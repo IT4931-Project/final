@@ -31,6 +31,51 @@ load_dotenv()
 # Connect to Docker daemon
 client = docker.from_env()
 
+# Store last run timestamps
+last_run_times = {
+    "crawler": None,
+    "etl": None
+}
+
+# Maximum runtime allowed (in seconds) before forcefully stopping a container
+# 30 minutes for crawler (generous timeout since we're doing parallel processing now)
+# 6 hours for ETL job
+MAX_RUNTIME = {
+    "crawler": 30 * 60,  # 30 minutes
+    "etl": 6 * 60 * 60   # 6 hours
+}
+
+def get_container_runtime(container):
+    """
+    Calculate how long a container has been running
+    
+    Args:
+        container: Docker container object
+        
+    Returns:
+        int: Runtime in seconds, or 0 if container is not running
+    """
+    if container.status != 'running':
+        return 0
+        
+    # Get container info which includes start time
+    container_info = container.attrs
+    
+    # Extract start time
+    started_at = container_info.get('State', {}).get('StartedAt', '')
+    if not started_at:
+        return 0
+        
+    # Convert to datetime and calculate difference
+    try:
+        start_time = datetime.datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        runtime = (now - start_time).total_seconds()
+        return runtime
+    except Exception as e:
+        logger.error(f"Error calculating container runtime: {str(e)}")
+        return 0
+
 def run_container(service_name):
     """
     Run a specific container using Docker API
@@ -46,21 +91,34 @@ def run_container(service_name):
         
         try:
             container = client.containers.get(container_name)
-            # Check if container is running and stop it if needed
-            if container.status == 'running':
-                logger.info(f"Container {container_name} is already running. Stopping it...")
-                container.stop()
-                logger.info(f"Container {container_name} stopped.")
-                
-            # Remove the container if it exists to create a fresh instance
-            container.remove()
-            logger.info(f"Removed existing container {container_name}")
             
+            # Check if container is running and how long it's been running
+            if container.status == 'running':
+                runtime = get_container_runtime(container)
+                max_allowed_runtime = MAX_RUNTIME.get(service_name, 60*60)  # Default 1 hour
+                
+                # If crawler is still running but within reasonable time, let it complete
+                if service_name == "crawler" and runtime < max_allowed_runtime:
+                    logger.info(f"Container {container_name} is still running (for {runtime:.2f} seconds). Allowing it to continue.")
+                    return False  # Indicate that we didn't start a new job
+                # For ETL or if container running too long, stop it
+                else:
+                    logger.info(f"Container {container_name} has been running for {runtime:.2f} seconds. Stopping it...")
+                    container.stop()
+                    logger.info(f"Container {container_name} stopped.")
+                    
+                    # Remove the container to create a fresh instance
+                    container.remove()
+                    logger.info(f"Removed existing container {container_name}")
+            else:
+                # Container exists but not running - remove it
+                container.remove()
+                logger.info(f"Removed existing stopped container {container_name}")
+                
         except docker.errors.NotFound:
             logger.info(f"Container {container_name} not found, will create a new one")
         
         # Execute a new container instance with the same configuration as in docker-compose
-        # This triggers a job run without modifications to the original setup
         logger.info(f"Creating and starting container {container_name}...")
         
         # Use the correct image name with hyphen instead of underscore
@@ -80,6 +138,9 @@ def run_container(service_name):
             }
         )
         
+        # Update the last run time
+        last_run_times[service_name] = datetime.datetime.now()
+        
         logger.info(f"Successfully started {service_name} job with container ID: {new_container.id[:12]}")
         return True
         
@@ -89,6 +150,8 @@ def run_container(service_name):
         try:
             logger.info(f"Attempting to use docker-compose to start {service_name} service...")
             os.system(f"docker-compose up -d {service_name}")
+            # Update the last run time even when using docker-compose
+            last_run_times[service_name] = datetime.datetime.now()
             return True
         except Exception as compose_error:
             logger.error(f"Docker-compose attempt also failed: {str(compose_error)}")
@@ -96,6 +159,28 @@ def run_container(service_name):
 
 def run_crawler_job():
     """Run the crawler job to fetch financial data"""
+    # Check if previous crawler is still running within reasonable time
+    try:
+        container_name = "finance_crawler"
+        try:
+            container = client.containers.get(container_name)
+            if container.status == 'running':
+                runtime = get_container_runtime(container)
+                
+                # If it's been running for less than the max allowed time, let it continue
+                if runtime < MAX_RUNTIME["crawler"]:
+                    logger.info(f"Crawler is still running for {runtime:.2f} seconds, which is within the allowed limit of {MAX_RUNTIME['crawler']} seconds. Skipping new job.")
+                    return False
+                    
+                # Otherwise, stop and restart
+                logger.info(f"Crawler has been running for {runtime:.2f} seconds, which exceeds reasonable time. Restarting.")
+        except docker.errors.NotFound:
+            # Container doesn't exist, so we'll create a new one
+            pass
+    except Exception as e:
+        logger.error(f"Error checking crawler status: {str(e)}")
+    
+    # Run the crawler job normally
     return run_container("crawler")
 
 def run_etl_job():
