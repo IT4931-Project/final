@@ -338,8 +338,8 @@ def process_symbol(symbol, producer):
     backoff.expo,
     Exception,
     max_tries=BACKOFF_MAX_TRIES,
-    min_delay=MIN_RETRY_WAIT,
-    max_delay=MAX_RETRY_WAIT
+    min_value=MIN_RETRY_WAIT,
+    max_value=MAX_RETRY_WAIT
 )
 def process_symbol_with_retry(symbol, producer):
     """Process a symbol with exponential backoff retry for API rate limits"""
