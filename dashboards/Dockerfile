@@ -18,4 +18,4 @@ COPY ./dashboards/*.py /app/
 COPY ./dashboards/*.ndjson /app/
 
 # Set up entrypoint
-ENTRYPOINT ["python", "dashboard_import.py"]
+ENTRYPOINT ["python", "generate_and_import.py"]
