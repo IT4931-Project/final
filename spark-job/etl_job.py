@@ -461,7 +461,7 @@ def write_processed_data_to_mongo_and_elasticsearch(df, symbol):
             # Write using this key for MongoDB
             df_to_write.write \
               .format("mongo") \
-              .mode("overwrite") \ 
+              .mode("overwrite") \
               .option("database", MONGO_DATABASE) \
               .option("collection", processed_collection_name) \
               .save()
